@@ -1,0 +1,55 @@
+@startuml MQX Architecture
+
+' 定义颜色
+!define BLUE #1E90FF
+!define GREEN #32CD32
+!define YELLOW #FFD700
+!define RED #FF6347
+
+skinparam {
+  backgroundColor #FFFFFF
+  roundCorner 10
+}
+
+' 应用层
+package "应用层 (Client)" {
+  [Producer] as producer BLUE
+  [Consumer] as consumer BLUE
+}
+
+' MQX 核心层
+package "MQX 核心层" {
+  [Topic Manager] as topicMgr GREEN
+  [Message Manager] as msgMgr GREEN
+  [Consumer Manager] as conMgr GREEN
+  [Producer Manager] as prodMgr GREEN
+  [Delay Manager] as delayMgr YELLOW
+  [Clear Manager] as clearMgr YELLOW
+}
+
+' 存储层
+package "存储层 (MySQL)" {
+  database "Topic Meta Table" as topicTable RED
+  database "Messages Tables" as msgTables RED
+  database "Consumer Tables" as conTables RED
+}
+
+' 连接关系
+producer --> prodMgr
+consumer --> conMgr
+
+prodMgr --> msgMgr
+prodMgr --> topicMgr
+conMgr --> msgMgr
+conMgr --> topicMgr
+delayMgr --> msgMgr
+clearMgr --> msgMgr
+
+topicMgr --> topicTable
+msgMgr --> msgTables
+conMgr --> conTables
+delayMgr --> msgTables
+clearMgr --> msgTables
+clearMgr --> conTables
+
+@enduml 

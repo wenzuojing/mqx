@@ -1,0 +1,1 @@
+UPDATE mqx_consumer_offsets SET `offset` = ? WHERE `group` = ? AND `topic` = ? AND `partition` = ? AND `instance_id` = ?

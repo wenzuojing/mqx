@@ -1,0 +1,1 @@
+SELECT GET_LOCK(?, ?);

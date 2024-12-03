@@ -1,0 +1,1 @@
+DELETE FROM mqx_delay_messages WHERE `id` = ? 
