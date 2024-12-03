@@ -183,6 +183,30 @@ go get github.com/github.com/wenzuojing/mqx
 
 ## 5. 配置说明
 
+### 配置项说明
+
+| 配置项 | 说明 | 默认值 | 单位 |
+|--------|------|--------|------|
+| DSN | 数据库连接字符串 | root:root@tcp(127.0.0.1:3306)/mqx | - |
+| DefaultPartitionNum | 默认分区数量 | 8 | 个 |
+| RetentionTime | 消息保留时间 | 168 (7天) | 小时 |
+| RebalanceInterval | 消费者重平衡间隔 | 30 | 秒 |
+| RefreshConsumerPartitionsInterval | 刷新消费者分区间隔 | 30 | 秒 |
+| HeartbeatInterval | 消费者心跳间隔 | 30 | 秒 |
+| DelayInterval | 延时消息处理间隔 | 5 | 秒 |
+| PullingInterval | 消息拉取间隔 | 2 | 秒 |
+| PullingSize | 单次拉取消息数量 | 100 | 条 |
+| RetryInterval | 失败重试间隔 | 3 | 秒 |
+| RetryTimes | 最大重试次数 | 3 | 次 |
+
+#### 配置方法示例
+
+```golang
+cfg := mqx.NewConfig()
+cfg.DSN = "root:root@tcp(127.0.0.1:3306)/mqx"
+```
+
+
 
 ### 数据库配置
 
