@@ -111,9 +111,38 @@ go get github.com/github.com/wenzuojing/mqx
 
 ### 生产者示例
 
+```golang
+	cfg := mqx.NewConfig()
+	cfg.DefaultPartitionNum = 16
+	mq, err := mqx.NewMQX(cfg)
+	if err != nil {
+		panic(err)
+	}
+	for i := 0; i < 100; i++ {
+		msg := mqx.NewMessage().WithTopic("test-topic").WithKey(fmt.Sprintf("%d", i)).WithBody([]byte(fmt.Sprintf("test message %d", i)))
+		id, err := mq.SendSync(context.TODO(), msg)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("id: %s\n", id)
+	}
+```
 
-### 生产者示例
 
+### 消费者示例
+```golang
+	cfg := mqx.NewConfig()
+	cfg.HeartbeatInterval = time.Second * 5
+	cfg.DefaultPartitionNum = 16
+	mq, err := mqx.NewMQX(cfg)
+	if err != nil {
+		panic(err)
+	}
+	mq.GroupSubscribe(context.TODO(), "test-topic", "test-group", func(msg *mqx.MessageView) error {
+		fmt.Printf("topic: %s, group: %s, partition: %d, key: %s, body: %s\n", msg.Topic, msg.Group, msg.Partition, msg.Key, string(msg.Body))
+		return nil
+	})
+```
 
 
 ## 3. 核心功能
