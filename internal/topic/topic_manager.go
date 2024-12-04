@@ -80,3 +80,21 @@ func (t *topicManager) GetAllTopicMeta(ctx context.Context) ([]model.TopicMeta, 
 	}
 	return metas, nil
 }
+
+func (t *topicManager) UpdateTopicMeta(ctx context.Context, meta *model.TopicMeta) error {
+	result, err := t.db.ExecContext(ctx, template.UpdateTopicMeta, meta.PartitionNum, meta.RetentionDays, meta.Topic)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
+}

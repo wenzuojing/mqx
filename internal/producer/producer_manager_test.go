@@ -41,6 +41,11 @@ func (m *MockFactory) GetDelayManager() interfaces.DelayManager {
 	return args.Get(0).(interfaces.DelayManager)
 }
 
+func (m *MockFactory) GetClearManager() interfaces.ClearManager {
+	args := m.Called()
+	return args.Get(0).(interfaces.ClearManager)
+}
+
 // MockMessageManager implements interfaces.MessageManager for testing
 type MockMessageManager struct {
 	mock.Mock

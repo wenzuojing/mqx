@@ -15,6 +15,9 @@ var GetTopicMeta string
 //go:embed sql/topic/insert_topic_meta.sql
 var InsertTopicMeta string
 
+//go:embed sql/topic/update_topic_meta.sql
+var UpdateTopicMeta string
+
 // Consumer related SQL statements
 //
 //go:embed sql/consumer/create_consumer_offsets_table.sql
@@ -92,3 +95,6 @@ var DeleteMessages string
 
 //go:embed sql/topic/get_topic_meta_list.sql
 var GetTopicMetaList string
+
+//go:embed sql/message/get_message_total.sql
+var GetMessageTotalTemplate string

@@ -130,6 +130,19 @@ func (s *messageManagerImpl) GetMaxOffset(ctx context.Context, topic string, par
 	return maxOffset, nil
 }
 
+func (s *messageManagerImpl) GetMessageTotal(ctx context.Context, topic string, partition int) (int64, error) {
+	tableName := s.getMessageTableName(topic, partition)
+	var total int64
+	err := s.db.QueryRowContext(ctx, template.GetMessageTotalTemplate, tableName).Scan(&total)
+	if err != nil {
+		if strings.Contains(err.Error(), "doesn't exist") {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return total, nil
+}
+
 // getMessageTableName returns the table name for a given topic
 func (s *messageManagerImpl) getMessageTableName(topic string, partition int) string {
 	return fmt.Sprintf("mqx_messages_%s_%d", topic, partition)

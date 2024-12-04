@@ -18,6 +18,8 @@ type MessageManager interface {
 	GetMessages(ctx context.Context, topic string, group string, partition int, offset int64, size int) ([]*model.Message, error)
 	// GetMaxOffset returns the highest offset in a partition
 	GetMaxOffset(ctx context.Context, topic string, partition int) (int64, error)
+	// GetMessageTotal returns the total number of messages in a partition
+	GetMessageTotal(ctx context.Context, topic string, partition int) (int64, error)
 }
 
 // TopicManager handles topic metadata management
@@ -26,6 +28,8 @@ type TopicManager interface {
 	GetTopicMeta(ctx context.Context, topic string) (*model.TopicMeta, error)
 	// GetAllTopicMeta retrieves metadata for all topics
 	GetAllTopicMeta(ctx context.Context) ([]model.TopicMeta, error)
+	// UpdateTopicMeta updates the metadata for a topic
+	UpdateTopicMeta(ctx context.Context, meta *model.TopicMeta) error
 	// Start initializes the topic manager service
 	Start(ctx context.Context) error
 	// Stop gracefully shuts down the topic manager service

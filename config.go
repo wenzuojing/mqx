@@ -7,7 +7,7 @@ type Config struct {
 	DefaultPartitionNum               int           // Default number of partitions
 	PollingInterval                   time.Duration // Message polling interval
 	PollingSize                       int           // Number of messages to poll
-	RetentionTime                     time.Duration // Message retention period
+	RetentionDays                     int           // Message retention days
 	RebalanceInterval                 time.Duration // Consumer rebalance interval
 	RefreshConsumerPartitionsInterval time.Duration // Refresh consumer partitions interval
 	HeartbeatInterval                 time.Duration // Consumer heartbeat interval
@@ -25,7 +25,7 @@ func NewConfig() *Config {
 		DefaultPartitionNum:               8,
 		PollingInterval:                   time.Second,
 		PollingSize:                       100,
-		RetentionTime:                     time.Hour * 24 * 7, // 7 days
+		RetentionDays:                     7,
 		RebalanceInterval:                 time.Second * 30,
 		RefreshConsumerPartitionsInterval: time.Second * 30,
 		HeartbeatInterval:                 time.Second * 30,

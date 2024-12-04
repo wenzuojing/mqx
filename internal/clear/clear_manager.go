@@ -71,7 +71,7 @@ func (c *clearManagerImpl) clearMessage(ctx context.Context) {
 			for _, topic := range topics {
 				partitionNum := topic.PartitionNum
 				for i := 0; i < partitionNum; i++ {
-					if err := c.clearMessageByPartition(ctx, topic.Topic, i); err != nil {
+					if err := c.clearMessageByPartition(ctx, topic.Topic, i, topic.RetentionDays); err != nil {
 						klog.Errorf("Failed to clear message by partition, topic: %s, partition: %d, error: %v", topic.Topic, i, err)
 					}
 				}
@@ -80,9 +80,9 @@ func (c *clearManagerImpl) clearMessage(ctx context.Context) {
 	}
 }
 
-func (c *clearManagerImpl) clearMessageByPartition(ctx context.Context, topic string, partition int) error {
+func (c *clearManagerImpl) clearMessageByPartition(ctx context.Context, topic string, partition int, retentionDays int) error {
 	tableName := getMessageTableName(topic, partition)
-	_, err := c.db.ExecContext(ctx, fmt.Sprintf(template.DeleteMessages, tableName), time.Now().Add(-c.cfg.RetentionTime))
+	_, err := c.db.ExecContext(ctx, fmt.Sprintf(template.DeleteMessages, tableName), time.Now().Add(-time.Duration(retentionDays)*time.Hour*24))
 	return err
 }
 
