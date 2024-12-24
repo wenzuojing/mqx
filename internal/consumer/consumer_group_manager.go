@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/wenzuojing/mqx/internal/config"
 	"github.com/wenzuojing/mqx/internal/interfaces"
 	"github.com/wenzuojing/mqx/internal/model"
@@ -114,8 +115,7 @@ func (c *consumerGroupManager) doRebalance(ctx context.Context) error {
 	klog.V(4).Infof("Starting rebalance for group: %s, topic: %s", c.group, c.topic)
 	instances, err := c.getActiveConsumerInstances(ctx, c.group, c.topic)
 	if err != nil {
-		klog.Errorf("Failed to get active consumer instances: %v", err)
-		return err
+		return errors.Wrap(err, "failed to get active consumer instances")
 	}
 
 	if len(instances) == 0 {
@@ -125,8 +125,7 @@ func (c *consumerGroupManager) doRebalance(ctx context.Context) error {
 
 	topicMeta, err := c.factory.GetTopicManager().GetTopicMeta(ctx, c.topic)
 	if err != nil {
-		klog.Errorf("Failed to get topic metadata: %v", err)
-		return err
+		return errors.Wrap(err, "failed to get topic metadata")
 	}
 
 	klog.V(4).Infof("Rebalancing %d partitions across %d instances",
@@ -148,8 +147,7 @@ func (c *consumerGroupManager) doRebalance(ctx context.Context) error {
 		return nil
 	}
 	if err := c.updateConsumerPartitions(ctx, partitions); err != nil {
-		klog.Errorf("Failed to rebalance consumer partitions: %v", err)
-		return err
+		return errors.Wrap(err, "failed to rebalance consumer partitions")
 	}
 	c.partitionsHash = partitionsHash
 	klog.V(4).Info("Rebalance completed successfully")
@@ -189,7 +187,7 @@ func (c *consumerGroupManager) getActiveConsumerInstances(ctx context.Context, g
 	instances := make([]model.ConsumerInstance, 0)
 	for rows.Next() {
 		var instance model.ConsumerInstance
-		err = rows.Scan(&instance.GroupID, &instance.InstanceID, &instance.Hostname, &instance.Active, &instance.Heartbeat)
+		err = rows.Scan(&instance.Group, &instance.Topic, &instance.InstanceID, &instance.Hostname, &instance.Active, &instance.Heartbeat)
 		if err != nil {
 			return nil, err
 		}

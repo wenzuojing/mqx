@@ -122,3 +122,45 @@ func (c *consumerManagerImpl) Consume(ctx context.Context, topic string, group s
 	klog.Infof("Successfully set up consumer for topic: %s, group: %s", topic, group)
 	return nil
 }
+
+func (c *consumerManagerImpl) GetConsumerPartitions(ctx context.Context, topic string) ([]model.ConsumerPartition, error) {
+	rows, err := c.db.QueryContext(ctx, template.GetConsumerTopicPartitions, topic)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var partitions []model.ConsumerPartition
+	for rows.Next() {
+		var partition model.ConsumerPartition
+		if err := rows.Scan(&partition.Topic, &partition.Group, &partition.Partition, &partition.Offset, &partition.InstanceID); err != nil {
+			return nil, err
+		}
+		partitions = append(partitions, partition)
+	}
+	return partitions, nil
+}
+
+func (c *consumerManagerImpl) GetConsumerInstances(ctx context.Context, topic string) ([]model.ConsumerInstance, error) {
+	rows, err := c.db.QueryContext(ctx, template.GetConsumerInstances, topic)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var instances []model.ConsumerInstance
+	for rows.Next() {
+		var instance model.ConsumerInstance
+		if err := rows.Scan(&instance.Group, &instance.Topic, &instance.InstanceID, &instance.Hostname, &instance.Active, &instance.Heartbeat); err != nil {
+			return nil, err
+		}
+		instances = append(instances, instance)
+	}
+	return instances, nil
+}
+
+func (c *consumerManagerImpl) DeleteConsumerPartitions(ctx context.Context, topic string) error {
+	_, err := c.db.ExecContext(ctx, template.DeleteConsumerPartitions, topic)
+	if err != nil {
+		return err
+	}
+	return nil
+}

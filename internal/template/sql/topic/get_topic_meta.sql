@@ -1,3 +1,3 @@
-SELECT `topic`, `partition_num` 
-FROM mqx_topic_metas 
+SELECT `topic`, `partition_num`, `retention_days` 
+FROM `mqx_topic_metas` 
 WHERE `topic` = ?

@@ -10,6 +10,7 @@ import (
 )
 
 func main() {
+
 	db, err := sql.Open("mysql", "aibox4you:Q43RsPAMPdTqpWfv@tcp(rm-bp1jat7yaz2y69zn26o.mysql.rds.aliyuncs.com:3306)/mqx_dev?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai")
 	if err != nil {
 		panic(err)

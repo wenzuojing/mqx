@@ -35,7 +35,7 @@ func (c *clearManagerImpl) Stop(ctx context.Context) error {
 }
 
 func (c *clearManagerImpl) clearConsumerInstance(ctx context.Context) {
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(c.cfg.ClearInterval)
 	defer ticker.Stop()
 
 	for {
@@ -52,7 +52,7 @@ func (c *clearManagerImpl) clearConsumerInstance(ctx context.Context) {
 }
 
 func (c *clearManagerImpl) clearMessage(ctx context.Context) {
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(c.cfg.ClearInterval)
 	defer ticker.Stop()
 
 	for {

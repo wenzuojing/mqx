@@ -25,7 +25,7 @@ type factoryImpl struct {
 func NewFactory(db *sql.DB, cfg *config.Config) (interfaces.Factory, error) {
 	f := &factoryImpl{}
 
-	topicManager, err := topic.NewTopicManager(db, cfg.DefaultPartitionNum)
+	topicManager, err := topic.NewTopicManager(db, cfg, f)
 	if err != nil {
 		return nil, err
 	}

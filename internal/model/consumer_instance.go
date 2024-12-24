@@ -3,7 +3,8 @@ package model
 import "time"
 
 type ConsumerInstance struct {
-	GroupID    string
+	Group      string
+	Topic      string
 	InstanceID string
 	Hostname   string
 	Active     bool

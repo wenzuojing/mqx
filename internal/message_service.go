@@ -7,6 +7,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/wenzuojing/mqx/internal/config"
+	"github.com/wenzuojing/mqx/internal/console"
 	"github.com/wenzuojing/mqx/internal/factory"
 	"github.com/wenzuojing/mqx/internal/interfaces"
 	"github.com/wenzuojing/mqx/internal/model"
@@ -39,6 +40,8 @@ func NewMessageService(cfg *config.Config) (MessageService, error) {
 		return nil, err
 	}
 
+	consoleServer := console.NewConsoleServer(cfg, factory)
+
 	klog.V(4).Info("Message service created successfully")
 	return &messageServiceImpl{
 		topicManager:    factory.GetTopicManager(),
@@ -48,6 +51,7 @@ func NewMessageService(cfg *config.Config) (MessageService, error) {
 		delayManager:    factory.GetDelayManager(),
 		clearManager:    factory.GetClearManager(),
 		db:              db,
+		consoleServer:   consoleServer,
 	}, nil
 }
 
@@ -59,6 +63,7 @@ type messageServiceImpl struct {
 	delayManager    interfaces.DelayManager
 	clearManager    interfaces.ClearManager
 	db              *sql.DB
+	consoleServer   *console.ConsoleServer
 }
 
 func (s *messageServiceImpl) Start(ctx context.Context) error {
@@ -114,6 +119,15 @@ func (s *messageServiceImpl) Start(ctx context.Context) error {
 		klog.V(4).Info("Starting clear manager...")
 		if err := s.clearManager.Start(ctx); err != nil {
 			klog.Errorf("Failed to start clear manager: %v", err)
+			return err
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		klog.V(4).Info("Starting console server...")
+		if err := s.consoleServer.Start(ctx); err != nil {
+			klog.Errorf("Failed to start console server: %v", err)
 			return err
 		}
 		return nil

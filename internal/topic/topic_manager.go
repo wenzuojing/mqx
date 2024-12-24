@@ -3,7 +3,10 @@ package topic
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
+	"github.com/pkg/errors"
+	"github.com/wenzuojing/mqx/internal/config"
 	"github.com/wenzuojing/mqx/internal/interfaces"
 	"github.com/wenzuojing/mqx/internal/model"
 	"github.com/wenzuojing/mqx/internal/template"
@@ -11,13 +14,14 @@ import (
 )
 
 // NewTopicManager creates a new topic manager with default partition settings
-func NewTopicManager(db *sql.DB, defaultPartitionNum int) (interfaces.TopicManager, error) {
-	return &topicManager{db: db, defaultPartitionNum: defaultPartitionNum}, nil
+func NewTopicManager(db *sql.DB, cfg *config.Config, factory interfaces.Factory) (interfaces.TopicManager, error) {
+	return &topicManager{db: db, cfg: cfg, factory: factory}, nil
 }
 
 type topicManager struct {
-	db                  *sql.DB
-	defaultPartitionNum int
+	db      *sql.DB
+	cfg     *config.Config
+	factory interfaces.Factory
 }
 
 func (t *topicManager) Start(ctx context.Context) error {
@@ -42,13 +46,12 @@ func (s *topicManager) GetTopicMeta(ctx context.Context, topic string) (*model.T
 	defer stmt.Close()
 
 	var meta model.TopicMeta
-	err = stmt.QueryRow(topic).Scan(&meta.Topic, &meta.PartitionNum)
+	err = stmt.QueryRow(topic).Scan(&meta.Topic, &meta.PartitionNum, &meta.RetentionDays)
 	if err == sql.ErrNoRows {
-		_, err = s.db.Exec(template.InsertTopicMeta, topic, s.defaultPartitionNum)
-		if err != nil {
+		if err := s.CreateTopic(ctx, &model.TopicMeta{Topic: topic, PartitionNum: s.cfg.DefaultPartitionNum, RetentionDays: s.cfg.RetentionDays}); err != nil {
 			return nil, err
 		}
-		return &model.TopicMeta{Topic: topic, PartitionNum: s.defaultPartitionNum}, nil
+		return &model.TopicMeta{Topic: topic, PartitionNum: s.cfg.DefaultPartitionNum, RetentionDays: s.cfg.RetentionDays}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -72,7 +75,7 @@ func (t *topicManager) GetAllTopicMeta(ctx context.Context) ([]model.TopicMeta, 
 	var metas []model.TopicMeta
 	for rows.Next() {
 		var meta model.TopicMeta
-		err := rows.Scan(&meta.Topic, &meta.PartitionNum)
+		err := rows.Scan(&meta.Topic, &meta.PartitionNum, &meta.RetentionDays)
 		if err != nil {
 			return nil, err
 		}
@@ -96,5 +99,45 @@ func (t *topicManager) UpdateTopicMeta(ctx context.Context, meta *model.TopicMet
 		return sql.ErrNoRows
 	}
 
+	return nil
+}
+
+func (t *topicManager) CreateTopic(ctx context.Context, meta *model.TopicMeta) error {
+	_, err := t.db.ExecContext(ctx, template.InsertTopicMeta, meta.Topic, meta.PartitionNum, meta.RetentionDays)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (t *topicManager) DeleteTopic(ctx context.Context, topic string) error {
+
+	instances, err := t.factory.GetConsumerManager().GetConsumerInstances(ctx, topic)
+	if err != nil {
+		return errors.Wrap(err, "failed to get consumer instances")
+	}
+
+	for _, instance := range instances {
+		if instance.Active {
+			return fmt.Errorf("topic %s has active consumers", topic)
+		}
+	}
+
+	topicMeta, err := t.GetTopicMeta(ctx, topic)
+	if err != nil {
+		return errors.Wrap(err, "failed to get topic meta")
+	}
+
+	//delete messages
+	for i := 0; i < topicMeta.PartitionNum; i++ {
+		t.factory.GetMessageManager().DeleteMessages(ctx, topicMeta.Topic, i)
+	}
+	//delete consumer partitions
+	t.factory.GetConsumerManager().DeleteConsumerPartitions(ctx, topicMeta.Topic)
+
+	_, err = t.db.ExecContext(ctx, template.DeleteTopicMeta, topic)
+	if err != nil {
+		return errors.Wrap(err, "failed to delete topic meta")
+	}
 	return nil
 }

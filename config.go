@@ -16,6 +16,12 @@ type Config struct {
 	PullingSize                       int           // Batch size for message pulling
 	RetryInterval                     time.Duration // Retry interval for failed operations
 	RetryTimes                        int           // Maximum number of retry attempts
+	ClearInterval                     time.Duration // Clear interval for expired messages
+	Console                           Console       // Console configuration
+}
+
+type Console struct {
+	Address string // Console server address
 }
 
 // NewConfig creates a new Config with default values
@@ -34,6 +40,8 @@ func NewConfig() *Config {
 		PullingSize:                       100,
 		RetryInterval:                     time.Second * 3,
 		RetryTimes:                        3,
+		ClearInterval:                     time.Second * 120,
+		Console:                           Console{Address: ":9000"},
 	}
 }
 
@@ -61,9 +69,8 @@ func (c *Config) WithPollingSize(size int) *Config {
 	return c
 }
 
-// WithRetentionTime sets the message retention period
-func (c *Config) WithRetentionTime(duration time.Duration) *Config {
-	c.RetentionTime = duration
+func (c *Config) WithRetentionDays(retentionDays int) *Config {
+	c.RetentionDays = retentionDays
 	return c
 }
 

@@ -96,7 +96,11 @@ func NewMQX(cfg *Config) (MQX, error) {
 		PullingSize:         cfg.PullingSize,
 		RetryInterval:       cfg.RetryInterval,
 		RetryTimes:          cfg.RetryTimes,
-		RetentionTime:       cfg.RetentionTime,
+		ClearInterval:       cfg.ClearInterval,
+		RetentionDays:       cfg.RetentionDays,
+		Console: config.Console{
+			Address: cfg.Console.Address,
+		},
 	})
 	if err != nil {
 		return nil, err

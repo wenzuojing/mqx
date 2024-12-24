@@ -1,0 +1,1 @@
+DELETE FROM consumer_partition WHERE topic = ?

@@ -3,11 +3,14 @@ package console
 import (
 	"context"
 	"net/http"
+	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/wenzuojing/mqx/internal/config"
 	"github.com/wenzuojing/mqx/internal/interfaces"
 	"github.com/wenzuojing/mqx/internal/model"
+	"k8s.io/klog"
 )
 
 type ConsoleServer struct {
@@ -32,24 +35,37 @@ type Topic struct {
 
 // SendMessageRequest represents the request structure for sending a message
 type SendMessageRequest struct {
-	Topic string `json:"topic" binding:"required"`
-	Tag   string `json:"tag"`
-	Key   string `json:"key"`
-	Body  string `json:"body" binding:"required"`
+	Tag  string `json:"tag"`
+	Key  string `json:"key"`
+	Body string `json:"body" binding:"required"`
 }
 
 // UpdateTopicRequest represents the request structure for updating topic metadata
 type UpdateTopicRequest struct {
+	PartitionNum  int `json:"partitionNum" binding:"required"`
+	RetentionDays int `json:"retentionDays" binding:"required"`
+}
+
+type CreateTopicRequest struct {
 	Topic         string `json:"topic" binding:"required"`
 	PartitionNum  int    `json:"partitionNum" binding:"required"`
 	RetentionDays int    `json:"retentionDays" binding:"required"`
 }
 
-func NewConsoleServer(cfg *config.Config) *ConsoleServer {
+func NewConsoleServer(cfg *config.Config, factory interfaces.Factory) *ConsoleServer {
 	engine := gin.Default()
+
+	// Add CORS middleware
+	corsConfig := cors.DefaultConfig()
+	corsConfig.AllowAllOrigins = true
+	corsConfig.AllowMethods = []string{"*"}
+	corsConfig.AllowHeaders = []string{"*"}
+	engine.Use(cors.New(corsConfig))
+
 	return &ConsoleServer{
-		cfg:    cfg,
-		engine: engine,
+		cfg:     cfg,
+		engine:  engine,
+		factory: factory,
 	}
 }
 
@@ -58,7 +74,13 @@ func (s *ConsoleServer) Start(ctx context.Context) error {
 	s.setupRoutes()
 
 	// Start HTTP server
-	return s.engine.Run(s.cfg.Console.Address)
+	go func() {
+		if err := s.engine.Run(s.cfg.Console.Address); err != nil {
+			klog.Errorf("Failed to start console server: %v", err)
+		}
+	}()
+
+	return nil
 }
 
 func (s *ConsoleServer) setupRoutes() {
@@ -67,9 +89,11 @@ func (s *ConsoleServer) setupRoutes() {
 	{
 		// Topic endpoints
 		api.GET("/topics", s.listTopics)
-		api.PUT("/topics", s.updateTopic)
+		api.PUT("/topics/:topic", s.updateTopic)
+		api.POST("/topics", s.createTopic)
+		api.DELETE("/topics/:topic", s.deleteTopic)
 		// Message endpoints
-		api.POST("/messages", s.sendMessage)
+		api.POST("/topics/:topic/messages", s.sendMessage)
 	}
 }
 
@@ -111,22 +135,29 @@ func (s *ConsoleServer) listTopics(c *gin.Context) {
 
 // sendMessage handles the POST /api/messages request
 func (s *ConsoleServer) sendMessage(c *gin.Context) {
+	topic := c.Param("topic")
+	if topic == "" {
+		c.JSON(http.StatusOK, gin.H{"error": "topic parameter is required"})
+		return
+	}
+
 	var req SendMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
 		return
 	}
 
 	msg := &model.Message{
-		Topic: req.Topic,
-		Tag:   req.Tag,
-		Key:   req.Key,
-		Body:  []byte(req.Body),
+		Topic:    topic,
+		Tag:      req.Tag,
+		Key:      req.Key,
+		Body:     []byte(req.Body),
+		BornTime: time.Now(),
 	}
 
 	messageID, err := s.factory.GetProducerManager().SendSync(c.Request.Context(), msg)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -137,9 +168,38 @@ func (s *ConsoleServer) sendMessage(c *gin.Context) {
 
 // updateTopic handles the PUT /api/topics request
 func (s *ConsoleServer) updateTopic(c *gin.Context) {
+	topic := c.Param("topic")
+	if topic == "" {
+		c.JSON(http.StatusOK, gin.H{"error": "topic parameter is required"})
+		return
+	}
+
 	var req UpdateTopicRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+
+	topicMeta := &model.TopicMeta{
+		Topic:         topic,
+		PartitionNum:  req.PartitionNum,
+		RetentionDays: req.RetentionDays,
+	}
+
+	if err := s.factory.GetTopicManager().UpdateTopicMeta(c.Request.Context(), topicMeta); err != nil {
+		klog.Errorf("Failed to update topic: %v", err)
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Topic updated successfully"})
+}
+
+// createTopic handles the POST /api/topics request
+func (s *ConsoleServer) createTopic(c *gin.Context) {
+	var req CreateTopicRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -149,10 +209,28 @@ func (s *ConsoleServer) updateTopic(c *gin.Context) {
 		RetentionDays: req.RetentionDays,
 	}
 
-	if err := s.factory.GetTopicManager().UpdateTopicMeta(c.Request.Context(), topicMeta); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := s.factory.GetTopicManager().CreateTopic(c.Request.Context(), topicMeta); err != nil {
+		klog.Errorf("Failed to create topic: %v", err)
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Topic updated successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Topic created successfully"})
+}
+
+// deleteTopic handles the DELETE /api/topics request
+func (s *ConsoleServer) deleteTopic(c *gin.Context) {
+	topic := c.Param("topic")
+	if topic == "" {
+		c.JSON(http.StatusOK, gin.H{"error": "topic parameter is required"})
+		return
+	}
+
+	if err := s.factory.GetTopicManager().DeleteTopic(c.Request.Context(), topic); err != nil {
+		klog.Errorf("Failed to delete topic: %v", err)
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Topic deleted successfully"})
 }

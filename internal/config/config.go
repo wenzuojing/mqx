@@ -16,6 +16,7 @@ type Config struct {
 	PullingSize                       int           // Batch size for message pulling
 	RetryInterval                     time.Duration // Retry interval for failed operations
 	RetryTimes                        int           // Maximum number of retry attempts
+	ClearInterval                     time.Duration // Clear interval for expired messages
 	Console                           Console       // Console configuration
 }
 

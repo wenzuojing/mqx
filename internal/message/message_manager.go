@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 	"github.com/wenzuojing/mqx/internal/interfaces"
 	"github.com/wenzuojing/mqx/internal/model"
 	"github.com/wenzuojing/mqx/internal/template"
@@ -40,9 +41,7 @@ func (s *messageManagerImpl) SaveMessage(ctx context.Context, msg *model.Message
 
 	// Validate topic name - only allow alphanumeric and underscore characters
 	if !isValidTopicName(msg.Topic) {
-		err := fmt.Errorf("invalid topic name '%s': only alphanumeric and underscore characters are allowed", msg.Topic)
-		klog.Error(err)
-		return "", err
+		return "", fmt.Errorf("invalid topic name")
 	}
 	if len(msg.Topic) > 256 {
 		return "", fmt.Errorf("topic name '%s' is too long: maximum length is 512 characters", msg.Topic)
@@ -50,8 +49,7 @@ func (s *messageManagerImpl) SaveMessage(ctx context.Context, msg *model.Message
 
 	topicMeta, err := s.factory.GetTopicManager().GetTopicMeta(ctx, msg.Topic)
 	if err != nil {
-		klog.Errorf("Failed to get topic metadata: %v", err)
-		return "", err
+		return "", errors.Wrap(err, "failed to get topic metadata")
 	}
 	// Calculate partition based on message key
 	partition := s.calculatePartition(msg.Key, topicMeta.PartitionNum)
@@ -60,8 +58,7 @@ func (s *messageManagerImpl) SaveMessage(ctx context.Context, msg *model.Message
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		klog.Errorf("Failed to begin transaction: %v", err)
-		return "", err
+		return "", errors.Wrap(err, "failed to begin transaction")
 	}
 	defer tx.Rollback()
 
@@ -73,21 +70,18 @@ func (s *messageManagerImpl) SaveMessage(ctx context.Context, msg *model.Message
 	if err != nil {
 		if strings.Contains(err.Error(), "doesn't exist") {
 			if err := s.createMessageTable(msg.Topic, msg.Partition); err != nil {
-				klog.Errorf("Failed to create message table: %v", err)
-				return "", err
+				return "", errors.Wrap(err, "failed to create message table")
 			}
 			// Retry insert after table creation
 			err = s.insertMessage(tx, msg)
 		}
 		if err != nil {
-			klog.Errorf("Failed to insert message: %v", err)
-			return "", err
+			return "", errors.Wrap(err, "failed to insert message")
 		}
 	}
 
 	if err = tx.Commit(); err != nil {
-		klog.Errorf("Failed to commit transaction: %v", err)
-		return "", err
+		return "", errors.Wrap(err, "failed to commit transaction")
 	}
 	klog.V(4).Infof("Successfully saved message with ID %s", msg.MessageID)
 	return msg.MessageID, nil
@@ -98,8 +92,7 @@ func (s *messageManagerImpl) GetMessages(ctx context.Context, topic string, grou
 	messages := make([]*model.Message, 0)
 	rows, err := s.db.Query(fmt.Sprintf(template.GetMessagesTemplate, s.getMessageTableName(topic, partition)), offset, size)
 	if err != nil {
-		klog.Errorf("Failed to query messages: %v", err)
-		return nil, err
+		return nil, errors.Wrap(err, "failed to query messages")
 	}
 	defer rows.Close()
 
@@ -108,8 +101,7 @@ func (s *messageManagerImpl) GetMessages(ctx context.Context, topic string, grou
 		message.Partition = partition
 		err = rows.Scan(&message.MessageID, &message.Tag, &message.Key, &message.Body, &message.BornTime, &message.Offset)
 		if err != nil {
-			klog.Errorf("Failed to scan message row: %v", err)
-			return nil, err
+			return nil, errors.Wrap(err, "failed to scan message row")
 		}
 		messages = append(messages, &message)
 	}
@@ -123,8 +115,7 @@ func (s *messageManagerImpl) GetMaxOffset(ctx context.Context, topic string, par
 	err := s.db.QueryRow(fmt.Sprintf(template.GetMaxOffsetTemplate, s.getMessageTableName(topic, partition)),
 		partition).Scan(&maxOffset)
 	if err != nil {
-		klog.Errorf("Failed to get max offset: %v", err)
-		return 0, err
+		return 0, errors.Wrap(err, "failed to get max offset")
 	}
 	klog.V(4).Infof("Max offset is %d", maxOffset)
 	return maxOffset, nil
@@ -165,8 +156,7 @@ func (t *messageManagerImpl) createMessageTable(topic string, partition int) err
 	klog.V(4).Infof("Creating message table for topic %s, partition %d", topic, partition)
 	_, err := t.db.Exec(fmt.Sprintf(template.CreateMessageTableTemplate, t.getMessageTableName(topic, partition)))
 	if err != nil {
-		klog.Errorf("Failed to create message table: %v", err)
-		return err
+		return errors.Wrap(err, "failed to create message table")
 	}
 	klog.V(4).Info("Message table created successfully")
 	return nil
@@ -191,6 +181,15 @@ func (s *messageManagerImpl) insertMessage(tx *sql.Tx, msg *model.Message) error
 	}
 	if rowsAffected == 0 {
 		return fmt.Errorf("message save failed")
+	}
+	return nil
+}
+
+func (s *messageManagerImpl) DeleteMessages(ctx context.Context, topic string, partition int) error {
+	//drop table
+	_, err := s.db.Exec(fmt.Sprintf(template.DropMessageTableTemplate, s.getMessageTableName(topic, partition)))
+	if err != nil {
+		return err
 	}
 	return nil
 }

@@ -18,6 +18,9 @@ var InsertTopicMeta string
 //go:embed sql/topic/update_topic_meta.sql
 var UpdateTopicMeta string
 
+//go:embed sql/topic/delete_topic_meta.sql
+var DeleteTopicMeta string
+
 // Consumer related SQL statements
 //
 //go:embed sql/consumer/create_consumer_offsets_table.sql
@@ -38,6 +41,9 @@ var GetConsumerOffset string
 //go:embed sql/consumer/get_consumer_partition.sql
 var GetConsumerPartition string
 
+//go:embed sql/consumer/get_consumer_topic_partitions.sql
+var GetConsumerTopicPartitions string
+
 //go:embed sql/consumer/create_consumer_instances_table.sql
 var CreateConsumerInstancesTable string
 
@@ -55,6 +61,12 @@ var DeleteUnactiveConsumerInstance string
 
 //go:embed sql/consumer/get_active_consumer_instances.sql
 var GetActiveConsumerInstances string
+
+//go:embed sql/consumer/delete_consumer_partitions.sql
+var DeleteConsumerPartitions string
+
+//go:embed sql/consumer/get_consumer_instances.sql
+var GetConsumerInstances string
 
 // Delay message related SQL statements
 //
@@ -80,6 +92,9 @@ var ReleaseLock string
 //
 //go:embed sql/message/create_message_table.sql
 var CreateMessageTableTemplate string
+
+//go:embed sql/message/drop_message_table.sql
+var DropMessageTableTemplate string
 
 //go:embed sql/message/insert_message.sql
 var InsertMessageTemplate string
