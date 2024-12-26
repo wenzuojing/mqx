@@ -1,9 +1,9 @@
 package model
 
-type ConsumerPartition struct {
-	Group      string
-	Topic      string
-	Partition  int
-	Offset     int64
-	InstanceID string
+type ConsumerOffset struct {
+	Group      string `json:"group"`
+	Topic      string `json:"topic"`
+	Partition  int    `json:"partition"`
+	Offset     int64  `json:"offset"`
+	InstanceID string `json:"instanceId"`
 }

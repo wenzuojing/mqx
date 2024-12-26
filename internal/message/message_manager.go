@@ -11,6 +11,7 @@ import (
 	"github.com/wenzuojing/mqx/internal/interfaces"
 	"github.com/wenzuojing/mqx/internal/model"
 	"github.com/wenzuojing/mqx/internal/template"
+	"github.com/wenzuojing/mqx/pkg/templatex"
 	"k8s.io/klog/v2"
 )
 
@@ -90,7 +91,7 @@ func (s *messageManagerImpl) SaveMessage(ctx context.Context, msg *model.Message
 func (s *messageManagerImpl) GetMessages(ctx context.Context, topic string, group string, partition int, offset int64, size int) ([]*model.Message, error) {
 	klog.V(4).Infof("Getting messages from topic %s, partition %d, offset %d, size %d", topic, partition, offset, size)
 	messages := make([]*model.Message, 0)
-	rows, err := s.db.Query(fmt.Sprintf(template.GetMessagesTemplate, s.getMessageTableName(topic, partition)), offset, size)
+	rows, err := s.db.Query(fmt.Sprintf(template.SelectMessagesTemplate, s.getMessageTableName(topic, partition)), offset, size)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to query messages")
 	}
@@ -112,7 +113,7 @@ func (s *messageManagerImpl) GetMessages(ctx context.Context, topic string, grou
 func (s *messageManagerImpl) GetMaxOffset(ctx context.Context, topic string, partition int) (int64, error) {
 	klog.V(4).Infof("Getting max offset for topic %s, partition %d", topic, partition)
 	var maxOffset int64
-	err := s.db.QueryRow(fmt.Sprintf(template.GetMaxOffsetTemplate, s.getMessageTableName(topic, partition)),
+	err := s.db.QueryRow(fmt.Sprintf(template.SelectMaxOffsetTemplate, s.getMessageTableName(topic, partition)),
 		partition).Scan(&maxOffset)
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to get max offset")
@@ -121,17 +122,61 @@ func (s *messageManagerImpl) GetMaxOffset(ctx context.Context, topic string, par
 	return maxOffset, nil
 }
 
-func (s *messageManagerImpl) GetMessageTotal(ctx context.Context, topic string, partition int) (int64, error) {
+func (s *messageManagerImpl) GetPartitionStat(ctx context.Context, topic string, partition int) (*interfaces.PartitionStat, error) {
 	tableName := s.getMessageTableName(topic, partition)
-	var total int64
-	err := s.db.QueryRowContext(ctx, template.GetMessageTotalTemplate, tableName).Scan(&total)
+	var stat interfaces.PartitionStat
+	err := s.db.QueryRowContext(ctx, fmt.Sprintf(template.SelectPartitionStatTemplate, tableName)).Scan(&stat.MaxOffset, &stat.MinOffset, &stat.Total)
 	if err != nil {
 		if strings.Contains(err.Error(), "doesn't exist") {
-			return 0, nil
+			return &stat, nil
 		}
-		return 0, err
+		return nil, err
 	}
-	return total, nil
+	return &stat, nil
+}
+
+func (s *messageManagerImpl) QueryMessageForPage(ctx context.Context, topic string, partition int, messageID string, tag string, pageNo int, pageSize int) (int, []*model.Message, error) {
+	tableName := s.getMessageTableName(topic, partition)
+	offset := (pageNo - 1) * pageSize
+	limit := pageSize
+	sql, err := templatex.Rander(template.SelectMessages2Template, map[string]interface{}{
+		"TableName": tableName,
+		"MessageID": messageID,
+		"Tag":       tag,
+	})
+	if err != nil {
+		return 0, nil, errors.Wrap(err, "failed to template sql")
+	}
+
+	args := []any{}
+	if messageID != "" {
+		args = append(args, messageID)
+	}
+	if tag != "" {
+		args = append(args, tag)
+	}
+	args = append(args, limit, offset)
+
+	rows, err := s.db.Query(sql, args...)
+
+	if err != nil && strings.Contains(err.Error(), "doesn't exist") {
+		return 0, nil, nil
+	}
+
+	if err != nil {
+		return 0, nil, errors.Wrap(err, "failed to query messages")
+	}
+	defer rows.Close()
+	messages := make([]*model.Message, 0)
+	for rows.Next() {
+		var message model.Message
+		err = rows.Scan(&message.MessageID, &message.Tag, &message.Key, &message.Body, &message.BornTime, &message.Offset)
+		if err != nil {
+			return 0, nil, errors.Wrap(err, "failed to scan message row")
+		}
+		messages = append(messages, &message)
+	}
+	return len(messages), messages, nil
 }
 
 // getMessageTableName returns the table name for a given topic

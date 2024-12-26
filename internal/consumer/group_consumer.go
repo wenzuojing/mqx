@@ -3,14 +3,12 @@ package consumer
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"sync"
 	"time"
 
 	"github.com/wenzuojing/mqx/internal/config"
 	"github.com/wenzuojing/mqx/internal/interfaces"
 	"github.com/wenzuojing/mqx/internal/model"
-	"github.com/wenzuojing/mqx/internal/template"
 	"k8s.io/klog/v2"
 )
 
@@ -63,7 +61,7 @@ func (g *groupConsumer) consume(ctx context.Context) {
 
 func (g *groupConsumer) refreshConsumerPatitions(ctx context.Context) error {
 	// Get assigned partitions for this consumer instance
-	consumerPartitions, err := g.getConsumerPartitions(ctx, g.group, g.topic, g.instanceID)
+	consumerOffsets, err := g.getConsumerOffsets(ctx, g.group, g.topic, g.instanceID)
 	if err != nil {
 		klog.Errorf("Failed to get consumer partitions: %v", err)
 		return err
@@ -72,26 +70,26 @@ func (g *groupConsumer) refreshConsumerPatitions(ctx context.Context) error {
 	defer g.mu.Unlock()
 
 	// Maintain partition consumers
-	for _, partition := range consumerPartitions {
+	for _, offset := range consumerOffsets {
 
 		if g.partitionConsumers == nil {
 			g.partitionConsumers = make(map[int]*partitionConsumer)
 		}
-		if _, ok := g.partitionConsumers[partition.Partition]; !ok {
-			klog.V(4).Infof("Creating new partition consumer for partition %d", partition.Partition)
+		if _, ok := g.partitionConsumers[offset.Partition]; !ok {
+			klog.V(4).Infof("Creating new partition consumer for partition %d", offset.Partition)
 			pc := &partitionConsumer{
 				db:         g.db,
 				factory:    g.factory,
 				cfg:        g.cfg,
 				topic:      g.topic,
 				group:      g.group,
-				partition:  partition.Partition,
+				partition:  offset.Partition,
 				instanceID: g.instanceID,
 				handler:    g.handler,
 				stopChan:   make(chan struct{}),
 			}
 			pc.Start(ctx)
-			g.partitionConsumers[partition.Partition] = pc
+			g.partitionConsumers[offset.Partition] = pc
 		}
 
 	}
@@ -99,7 +97,7 @@ func (g *groupConsumer) refreshConsumerPatitions(ctx context.Context) error {
 	// Remove partition consumers that are no longer assigned
 	for partition, pc := range g.partitionConsumers {
 		exist := false
-		for _, item := range consumerPartitions {
+		for _, item := range consumerOffsets {
 			if item.Partition == partition {
 				exist = true
 				break
@@ -111,29 +109,20 @@ func (g *groupConsumer) refreshConsumerPatitions(ctx context.Context) error {
 			delete(g.partitionConsumers, partition)
 		}
 	}
-	fmt.Printf("partitionConsumers: %+v\n", g.partitionConsumers)
 	return nil
 }
 
-// getConsumerPartitions retrieves the partitions assigned to this consumer instance
-func (g *groupConsumer) getConsumerPartitions(ctx context.Context, group, topic, instanceID string) (map[int]model.ConsumerPartition, error) {
-	rows, err := g.db.Query(template.GetConsumerPartition,
-		group, topic, instanceID)
+// getConsumerOffsets retrieves the partitions assigned to this consumer instance
+func (g *groupConsumer) getConsumerOffsets(ctx context.Context, group, topic, instanceID string) ([]model.ConsumerOffset, error) {
+	consumerOffsets, err := g.factory.GetConsumerManager().GetConsumerOffsets(ctx, topic, group)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	partitions := make(map[int]model.ConsumerPartition)
-	for rows.Next() {
-		var p model.ConsumerPartition
-		if err := rows.Scan(&p.Partition); err != nil {
-			return nil, err
+	consumerOffsetsForInstance := make([]model.ConsumerOffset, 0)
+	for _, offset := range consumerOffsets {
+		if offset.InstanceID == instanceID {
+			consumerOffsetsForInstance = append(consumerOffsetsForInstance, offset)
 		}
-		p.Group = group
-		p.Topic = topic
-		p.InstanceID = instanceID
-		partitions[p.Partition] = p
 	}
-	return partitions, rows.Err()
+	return consumerOffsetsForInstance, nil
 }

@@ -1,0 +1,1 @@
+DELETE FROM `mqx_consumer_offsets` WHERE topic = ?

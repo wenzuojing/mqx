@@ -11,6 +11,7 @@ import (
 	"github.com/wenzuojing/mqx/internal/interfaces"
 	"github.com/wenzuojing/mqx/internal/model"
 	"github.com/wenzuojing/mqx/internal/template"
+	"github.com/wenzuojing/mqx/pkg/templatex"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/klog/v2"
 )
@@ -123,15 +124,26 @@ func (c *consumerManagerImpl) Consume(ctx context.Context, topic string, group s
 	return nil
 }
 
-func (c *consumerManagerImpl) GetConsumerPartitions(ctx context.Context, topic string) ([]model.ConsumerPartition, error) {
-	rows, err := c.db.QueryContext(ctx, template.GetConsumerTopicPartitions, topic)
+func (c *consumerManagerImpl) GetConsumerOffsets(ctx context.Context, topic string, group string) ([]model.ConsumerOffset, error) {
+	args := []any{topic}
+	if group != "" {
+		args = append(args, group)
+	}
+	sql, err := templatex.Rander(template.SelectConsumerOffsets, map[string]any{
+		"Topic": topic,
+		"Group": group,
+	})
+	if err != nil {
+		return nil, err
+	}
+	rows, err := c.db.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var partitions []model.ConsumerPartition
+	var partitions []model.ConsumerOffset
 	for rows.Next() {
-		var partition model.ConsumerPartition
+		var partition model.ConsumerOffset
 		if err := rows.Scan(&partition.Topic, &partition.Group, &partition.Partition, &partition.Offset, &partition.InstanceID); err != nil {
 			return nil, err
 		}
@@ -140,8 +152,20 @@ func (c *consumerManagerImpl) GetConsumerPartitions(ctx context.Context, topic s
 	return partitions, nil
 }
 
-func (c *consumerManagerImpl) GetConsumerInstances(ctx context.Context, topic string) ([]model.ConsumerInstance, error) {
-	rows, err := c.db.QueryContext(ctx, template.GetConsumerInstances, topic)
+func (c *consumerManagerImpl) GetConsumerInstances(ctx context.Context, topic string, group string) ([]model.ConsumerInstance, error) {
+	args := []any{topic}
+	if group != "" {
+		args = append(args, group)
+	}
+	sql, err := templatex.Rander(template.SelectConsumerInstances, map[string]any{
+		"Topic": topic,
+		"Group": group,
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	rows, err := c.db.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -157,8 +181,8 @@ func (c *consumerManagerImpl) GetConsumerInstances(ctx context.Context, topic st
 	return instances, nil
 }
 
-func (c *consumerManagerImpl) DeleteConsumerPartitions(ctx context.Context, topic string) error {
-	_, err := c.db.ExecContext(ctx, template.DeleteConsumerPartitions, topic)
+func (c *consumerManagerImpl) DeleteConsumerOffsets(ctx context.Context, topic string) error {
+	_, err := c.db.ExecContext(ctx, template.DeleteConsumerOffsets, topic)
 	if err != nil {
 		return err
 	}

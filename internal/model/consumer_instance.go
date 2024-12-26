@@ -3,10 +3,10 @@ package model
 import "time"
 
 type ConsumerInstance struct {
-	Group      string
-	Topic      string
-	InstanceID string
-	Hostname   string
-	Active     bool
-	Heartbeat  time.Time
+	Group      string    `json:"group"`
+	Topic      string    `json:"topic"`
+	InstanceID string    `json:"instanceId"`
+	Hostname   string    `json:"hostname"`
+	Active     bool      `json:"active"`
+	Heartbeat  time.Time `json:"heartbeat"`
 }

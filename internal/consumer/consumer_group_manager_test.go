@@ -184,7 +184,7 @@ func TestConsumerGroupManager_UpdateConsumerPartitions(t *testing.T) {
 		db: db,
 	}
 
-	partitions := []model.ConsumerPartition{
+	partitions := []model.ConsumerOffset{
 		{
 			Group:      "test-group",
 			Topic:      "test-topic",

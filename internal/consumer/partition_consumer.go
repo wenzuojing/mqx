@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/wenzuojing/mqx/internal/config"
@@ -80,35 +81,36 @@ func (p *partitionConsumer) consume(ctx context.Context) {
 			// Fetch messages from the current offset
 			msgs, err := p.factory.GetMessageManager().GetMessages(ctx, p.topic, p.group, p.partition, offset, p.cfg.PollingSize)
 			if err != nil {
-				klog.Errorf("Failed to get messages: %v", err)
-				return
-			}
-
-			// Process fetched messages
-			for index, msg := range msgs {
-				if err := p.callHandler(msg); err != nil {
-					klog.Errorf("Failed to process message: %v", err)
-					// Move failed message to dead letter queue
-					p.factory.GetMessageManager().SaveMessage(ctx, &model.Message{
-						MessageID: msg.MessageID,
-						Topic:     msg.Topic + "_dead",
-						Partition: msg.Partition,
-						Offset:    msg.Offset,
-						Key:       msg.Key,
-						BornTime:  msg.BornTime,
-						Body:      msg.Body,
-					})
-					continue
+				if !strings.Contains(err.Error(), "doesn't exist") {
+					klog.Errorf("Failed to get messages: %v", err)
 				}
+			} else {
+				// Process fetched messages
+				for index, msg := range msgs {
+					if err := p.callHandler(msg); err != nil {
+						klog.Errorf("Failed to process message: %v", err)
+						// Move failed message to dead letter queue
+						p.factory.GetMessageManager().SaveMessage(ctx, &model.Message{
+							MessageID: msg.MessageID,
+							Topic:     msg.Topic + "_dead",
+							Partition: msg.Partition,
+							Offset:    msg.Offset,
+							Key:       msg.Key,
+							BornTime:  msg.BornTime,
+							Body:      msg.Body,
+						})
+						continue
+					}
 
-				if p.group == "__broadcast__" {
-					_offset = offset + int64((index + 1))
-				} else {
-					// Update consumer offset after successful processing
-					err := p.updateConsumerOffset(ctx, p.group, p.topic, p.partition, p.instanceID, msg.Offset)
-					if err != nil {
-						klog.Errorf("Failed to update consumer offset: %v", err)
-						break
+					if p.group == "__broadcast__" {
+						_offset = offset + int64((index + 1))
+					} else {
+						// Update consumer offset after successful processing
+						err := p.updateConsumerOffset(ctx, p.group, p.topic, p.partition, p.instanceID, msg.Offset)
+						if err != nil {
+							klog.Errorf("Failed to update consumer offset: %v", err)
+							break
+						}
 					}
 				}
 			}
@@ -140,15 +142,16 @@ func (p *partitionConsumer) updateConsumerOffset(ctx context.Context, group stri
 }
 
 func (p *partitionConsumer) getOffset(ctx context.Context, group string, topic string, partition int, instanceID string) (int64, error) {
-	var offset int64
-	err := p.db.QueryRow(template.GetConsumerOffset, group, topic, partition, instanceID).Scan(&offset)
-	if err == sql.ErrNoRows {
-		return 0, ErrOffsetNotFound
-	}
+	offsets, err := p.factory.GetConsumerManager().GetConsumerOffsets(ctx, topic, group)
 	if err != nil {
 		return 0, err
 	}
-	return offset, nil
+	for _, offset := range offsets {
+		if offset.Partition == partition && offset.InstanceID == instanceID {
+			return offset.Offset, nil
+		}
+	}
+	return 0, ErrOffsetNotFound
 }
 
 // callHandler executes message handler with retry mechanism

@@ -131,10 +131,10 @@ func (c *consumerGroupManager) doRebalance(ctx context.Context) error {
 	klog.V(4).Infof("Rebalancing %d partitions across %d instances",
 		topicMeta.PartitionNum, len(instances))
 
-	var partitions []model.ConsumerPartition
+	var partitions []model.ConsumerOffset
 	for i := 0; i < topicMeta.PartitionNum; i++ {
 		instance := instances[i%len(instances)]
-		partitions = append(partitions, model.ConsumerPartition{
+		partitions = append(partitions, model.ConsumerOffset{
 			Group:      c.group,
 			Topic:      c.topic,
 			Partition:  i,
@@ -178,25 +178,21 @@ func (c *consumerGroupManager) updateConsumerInstanceHeartbeat(ctx context.Conte
 }
 
 func (c *consumerGroupManager) getActiveConsumerInstances(ctx context.Context, group string, topic string) ([]model.ConsumerInstance, error) {
-	rows, err := c.db.Query(template.GetActiveConsumerInstances, group, topic)
+	instances, err := c.factory.GetConsumerManager().GetConsumerInstances(ctx, topic, group)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	instances := make([]model.ConsumerInstance, 0)
-	for rows.Next() {
-		var instance model.ConsumerInstance
-		err = rows.Scan(&instance.Group, &instance.Topic, &instance.InstanceID, &instance.Hostname, &instance.Active, &instance.Heartbeat)
-		if err != nil {
-			return nil, err
+	//filter active instances
+	activeInstances := make([]model.ConsumerInstance, 0)
+	for _, instance := range instances {
+		if instance.Active && instance.Heartbeat.After(time.Now().Add(-c.cfg.HeartbeatInterval*3)) {
+			activeInstances = append(activeInstances, instance)
 		}
-		instances = append(instances, instance)
 	}
-	return instances, nil
+	return activeInstances, nil
 }
 
-func (c *consumerGroupManager) updateConsumerPartitions(ctx context.Context, partitions []model.ConsumerPartition) error {
+func (c *consumerGroupManager) updateConsumerPartitions(ctx context.Context, partitions []model.ConsumerOffset) error {
 	klog.Infof("Rebalancing consumer partitions for %d partitions", len(partitions))
 
 	tx, err := c.db.Begin()
@@ -242,7 +238,7 @@ func (c *consumerGroupManager) updateConsumerPartitions(ctx context.Context, par
 	return nil
 }
 
-func hashPartitions(partitions []model.ConsumerPartition) string {
+func hashPartitions(partitions []model.ConsumerOffset) string {
 	sort.Slice(partitions, func(i, j int) bool {
 		return partitions[i].Partition < partitions[j].Partition
 	})

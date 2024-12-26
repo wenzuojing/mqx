@@ -18,10 +18,12 @@ type MessageManager interface {
 	GetMessages(ctx context.Context, topic string, group string, partition int, offset int64, size int) ([]*model.Message, error)
 	// GetMaxOffset returns the highest offset in a partition
 	GetMaxOffset(ctx context.Context, topic string, partition int) (int64, error)
-	// GetMessageTotal returns the total number of messages in a partition
-	GetMessageTotal(ctx context.Context, topic string, partition int) (int64, error)
+	// GetPartitionStat returns the stat of messages in a partition
+	GetPartitionStat(ctx context.Context, topic string, partition int) (*PartitionStat, error)
 	// DeleteMessages deletes messages from a specific partition
 	DeleteMessages(ctx context.Context, topic string, partition int) error
+	// QueryMessageForPage retrieves messages from a specific partition for pagination
+	QueryMessageForPage(ctx context.Context, topic string, partition int, messageID string, tag string, pageNo int, pageSize int) (int, []*model.Message, error)
 }
 
 // TopicManager handles topic metadata management
@@ -44,12 +46,12 @@ type TopicManager interface {
 
 // ConsumerManager handles message consumption and consumer group management
 type ConsumerManager interface {
-	// DeleteConsumerPartitions deletes the partitions by topic
-	DeleteConsumerPartitions(ctx context.Context, topic string) error
-	// GetConsumerPartitions returns the partitions by topic
-	GetConsumerPartitions(ctx context.Context, topic string) ([]model.ConsumerPartition, error)
-	// GetConsumerInstances returns the instances by topic
-	GetConsumerInstances(ctx context.Context, topic string) ([]model.ConsumerInstance, error)
+	// DeleteConsumerOffsetsByTopic deletes the partitions by topic
+	DeleteConsumerOffsets(ctx context.Context, topic string) error
+	// GetConsumerOffsetsByTopicAndGroup returns the partitions by topic and group
+	GetConsumerOffsets(ctx context.Context, topic string, group string) ([]model.ConsumerOffset, error)
+	// GetConsumerInstance returns the instance by topic and group
+	GetConsumerInstances(ctx context.Context, topic string, group string) ([]model.ConsumerInstance, error)
 	// Consume starts consuming messages from a topic with the specified handler
 	Consume(ctx context.Context, topic string, group string, handler func(msg *model.Message) error) error
 	// Start initializes the consumer manager service

@@ -129,7 +129,7 @@ func TestGroupConsumer_GetConsumerPartitions(t *testing.T) {
 		instanceID: "test-instance",
 	}
 
-	partitions, err := gc.getConsumerPartitions(context.Background(), "test-group", "test-topic", "test-instance")
+	partitions, err := gc.getConsumerOffsets(context.Background(), "test-group", "test-topic", "test-instance")
 	assert.NoError(t, err)
 	assert.Len(t, partitions, 2)
 	assert.Contains(t, partitions, 0)
@@ -161,7 +161,7 @@ func TestGroupConsumer_PartitionManagement(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"partition"}).AddRow(0))
 
 	ctx := context.Background()
-	partitions, err := gc.getConsumerPartitions(ctx, gc.group, gc.topic, gc.instanceID)
+	partitions, err := gc.getConsumerOffsets(ctx, gc.group, gc.topic, gc.instanceID)
 	assert.NoError(t, err)
 
 	gc.mu.Lock()

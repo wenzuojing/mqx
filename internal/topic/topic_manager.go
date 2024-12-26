@@ -112,7 +112,7 @@ func (t *topicManager) CreateTopic(ctx context.Context, meta *model.TopicMeta) e
 
 func (t *topicManager) DeleteTopic(ctx context.Context, topic string) error {
 
-	instances, err := t.factory.GetConsumerManager().GetConsumerInstances(ctx, topic)
+	instances, err := t.factory.GetConsumerManager().GetConsumerInstances(ctx, topic, "")
 	if err != nil {
 		return errors.Wrap(err, "failed to get consumer instances")
 	}
@@ -132,8 +132,8 @@ func (t *topicManager) DeleteTopic(ctx context.Context, topic string) error {
 	for i := 0; i < topicMeta.PartitionNum; i++ {
 		t.factory.GetMessageManager().DeleteMessages(ctx, topicMeta.Topic, i)
 	}
-	//delete consumer partitions
-	t.factory.GetConsumerManager().DeleteConsumerPartitions(ctx, topicMeta.Topic)
+	//delete consumer offsets
+	t.factory.GetConsumerManager().DeleteConsumerOffsets(ctx, topicMeta.Topic)
 
 	_, err = t.db.ExecContext(ctx, template.DeleteTopicMeta, topic)
 	if err != nil {

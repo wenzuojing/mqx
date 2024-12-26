@@ -3,6 +3,8 @@ package console
 import (
 	"context"
 	"net/http"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -31,6 +33,11 @@ type Topic struct {
 	PartitionNum  int    `json:"partitionNum"`
 	RetentionDays int    `json:"retentionDays"`
 	MessageTotal  int64  `json:"messageTotal"`
+}
+
+type Partition struct {
+	Partition int                       `json:"partition"`
+	Stat      *interfaces.PartitionStat `json:"stat"`
 }
 
 // SendMessageRequest represents the request structure for sending a message
@@ -94,7 +101,209 @@ func (s *ConsoleServer) setupRoutes() {
 		api.DELETE("/topics/:topic", s.deleteTopic)
 		// Message endpoints
 		api.POST("/topics/:topic/messages", s.sendMessage)
+
+		api.GET("/topics/:topic/consumer-groups", s.listConsumerGroups)
+		api.GET("/topics/:topic/consumer-groups/:group/offsets", s.listConsumerGroupOffsets)
+		api.GET("/topics/:topic/partitions", s.listPartitions)
+
+		api.GET("/messages", s.listMessages)
 	}
+}
+
+func (s *ConsoleServer) listMessages(c *gin.Context) {
+
+	var params struct {
+		Topic     string `form:"topic" binding:"required"`
+		Partition int    `form:"partition"`
+		MessageID string `form:"messageId"`
+		Tag       string `form:"tag"`
+		PageNo    int    `form:"pageNo" binding:"required"`
+		PageSize  int    `form:"pageSize" binding:"required"`
+	}
+	if err := c.ShouldBindQuery(&params); err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+	total, messages, err := s.factory.GetMessageManager().QueryMessageForPage(c.Request.Context(), params.Topic, params.Partition, params.MessageID, params.Tag, params.PageNo, params.PageSize)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"messages": messages, "total": total})
+}
+
+func (s *ConsoleServer) listConsumerGroups(c *gin.Context) {
+	topic := c.Param("topic")
+	if topic == "" {
+		c.JSON(http.StatusOK, gin.H{"error": "topic parameter is required"})
+		return
+	}
+
+	consumerInstances, err := s.factory.GetConsumerManager().GetConsumerInstances(c.Request.Context(), topic, "")
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+
+	activeInstances := make([]model.ConsumerInstance, 0)
+	for _, instance := range consumerInstances {
+		if instance.Active && instance.Heartbeat.After(time.Now().Add(-s.cfg.HeartbeatInterval*3)) {
+			activeInstances = append(activeInstances, instance)
+		}
+	}
+	groupInstanceCount := make(map[string]int)
+	for _, instance := range activeInstances {
+		groupInstanceCount[instance.Group]++
+	}
+
+	partitions, err := queryTopicPartitions(c.Request.Context(), s.factory, topic)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+
+	consumerOffsets, err := s.factory.GetConsumerManager().GetConsumerOffsets(c.Request.Context(), topic, "")
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+
+	type ConsumerGroup struct {
+		Group       string `json:"group"`
+		Delay       int64  `json:"delay"`
+		ClientCount int    `json:"clientCount"`
+	}
+
+	max := func(a, b int64) int64 {
+		if a > b {
+			return a
+		}
+		return b
+	}
+
+	var consumerGroups []ConsumerGroup
+	for group, clientCount := range groupInstanceCount {
+		consumerGroup := ConsumerGroup{
+			Group:       group,
+			ClientCount: clientCount,
+		}
+
+		var delay int64
+		for _, offset := range consumerOffsets {
+			if offset.Group != group {
+				continue
+			}
+			for _, partition := range partitions {
+				if partition.Partition == offset.Partition {
+					delay += partition.Stat.MaxOffset - max(offset.Offset, partition.Stat.MinOffset)
+				}
+			}
+		}
+		consumerGroup.Delay = delay
+		consumerGroups = append(consumerGroups, consumerGroup)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"consumerGroups": consumerGroups,
+	})
+}
+
+func (s *ConsoleServer) listConsumerGroupOffsets(c *gin.Context) {
+	topic := c.Param("topic")
+	if topic == "" {
+		c.JSON(http.StatusOK, gin.H{"error": "topic parameter is required"})
+		return
+	}
+
+	group := c.Param("group")
+	if group == "" {
+		c.JSON(http.StatusOK, gin.H{"error": "group parameter is required"})
+		return
+	}
+
+	partitions, err := queryTopicPartitions(c.Request.Context(), s.factory, topic)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+
+	partitionStatMap := make(map[int]*Partition)
+	for _, partition := range partitions {
+		partitionStatMap[partition.Partition] = &partition
+	}
+
+	consumerInstances, err := s.factory.GetConsumerManager().GetConsumerInstances(c.Request.Context(), topic, group)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+	instanceMap := make(map[string]*model.ConsumerInstance)
+	for _, instance := range consumerInstances {
+		if instance.Group == group {
+			instanceMap[instance.InstanceID] = &instance
+		}
+	}
+
+	consumerOffsets, err := s.factory.GetConsumerManager().GetConsumerOffsets(c.Request.Context(), topic, group)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+
+	partitionMap := make(map[int]*model.ConsumerOffset)
+	for _, offset := range consumerOffsets {
+		partitionMap[offset.Partition] = &offset
+	}
+
+	type Offset struct {
+		Partition  int    `json:"partition"`
+		Offset     int64  `json:"offset"`
+		InstanceId string `json:"instanceId"`
+		Hostname   string `json:"hostname"`
+		Active     bool   `json:"active"`
+		MaxOffset  int64  `json:"maxOffset"`
+		MinOffset  int64  `json:"minOffset"`
+	}
+
+	var offsets []Offset
+	for _, partition := range partitions {
+		consumerPartition := partitionMap[partition.Partition]
+
+		offsets = append(offsets, Offset{
+			Partition: partition.Partition,
+			Offset:    consumerPartition.Offset,
+		})
+
+		if instance, ok := instanceMap[consumerPartition.InstanceID]; ok {
+			offsets[partition.Partition].InstanceId = instance.InstanceID
+			offsets[partition.Partition].Hostname = instance.Hostname
+			offsets[partition.Partition].Active = instance.Active
+		}
+
+		if stat, ok := partitionStatMap[partition.Partition]; ok {
+			offsets[partition.Partition].MaxOffset = stat.Stat.MaxOffset
+			offsets[partition.Partition].MinOffset = stat.Stat.MinOffset
+		}
+
+	}
+
+	c.JSON(http.StatusOK, gin.H{"offsets": offsets})
+}
+
+func (s *ConsoleServer) listPartitions(c *gin.Context) {
+	topic := c.Param("topic")
+	if topic == "" {
+		c.JSON(http.StatusOK, gin.H{"error": "topic parameter is required"})
+		return
+	}
+
+	partitions, err := queryTopicPartitions(c.Request.Context(), s.factory, topic)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"partitions": partitions})
 }
 
 // listTopics handles the GET /api/topics request
@@ -106,6 +315,8 @@ func (s *ConsoleServer) listTopics(c *gin.Context) {
 	}
 
 	var topics []Topic
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 
 	for _, topicMeta := range topicMetas {
 		topic := Topic{
@@ -114,17 +325,22 @@ func (s *ConsoleServer) listTopics(c *gin.Context) {
 			RetentionDays: topicMeta.RetentionDays,
 		}
 
+		wg.Add(topicMeta.PartitionNum)
 		for i := 0; i < topicMeta.PartitionNum; i++ {
-			var messageTotal int64
-			if messageTotal, err = s.factory.GetMessageManager().GetMessageTotal(c.Request.Context(), topicMeta.Topic, i); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			topic.MessageTotal = topic.MessageTotal + messageTotal
+			go func(t *Topic, partition int) {
+				defer wg.Done()
+				stat, err := s.factory.GetMessageManager().GetPartitionStat(context.Background(), t.Topic, partition)
+				if err != nil {
+					klog.Errorf("Failed to get message total for topic %s partition %d: %v", t.Topic, partition, err)
+					return
+				}
+				mu.Lock()
+				t.MessageTotal += stat.Total
+				mu.Unlock()
+			}(&topic, i)
 		}
-
+		wg.Wait()
 		topics = append(topics, topic)
-
 	}
 
 	c.JSON(http.StatusOK, TopicListResponse{
@@ -233,4 +449,37 @@ func (s *ConsoleServer) deleteTopic(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Topic deleted successfully"})
+}
+
+func queryTopicPartitions(ctx context.Context, factory interfaces.Factory, topic string) ([]Partition, error) {
+
+	topicMeta, err := factory.GetTopicManager().GetTopicMeta(ctx, topic)
+	if err != nil {
+		return nil, err
+	}
+
+	var partitions []Partition
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for i := 0; i < topicMeta.PartitionNum; i++ {
+		wg.Add(1)
+		go func(partition int) {
+			defer wg.Done()
+			stat, err := factory.GetMessageManager().GetPartitionStat(context.Background(), topic, partition)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			partitions = append(partitions, Partition{Partition: partition, Stat: stat})
+			mu.Unlock()
+		}(i)
+	}
+	wg.Wait()
+	//排序
+	sort.Slice(partitions, func(i, j int) bool {
+		return partitions[i].Partition < partitions[j].Partition
+	})
+	return partitions, nil
+
 }

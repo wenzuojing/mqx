@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
@@ -29,6 +30,19 @@ type MessageService interface {
 func NewMessageService(cfg *config.Config) (MessageService, error) {
 	klog.V(4).Info("Creating new message service")
 	db, err := sql.Open("mysql", cfg.DSN)
+	// 设置最大连接数
+	db.SetMaxOpenConns(100)
+	// 设置最大空闲连接数
+	db.SetMaxIdleConns(50)
+	// 设置连接的最大存活时间
+	db.SetConnMaxLifetime(time.Hour)
+	// Enable automatic reconnection
+	db.SetConnMaxIdleTime(time.Hour)
+	// Ping database to verify connection
+	if err := db.Ping(); err != nil {
+		klog.Errorf("Failed to ping database: %v", err)
+		return nil, err
+	}
 	if err != nil {
 		klog.Errorf("Failed to open database connection: %v", err)
 		return nil, err
