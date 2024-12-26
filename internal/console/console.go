@@ -2,6 +2,8 @@ package console
 
 import (
 	"context"
+	"embed"
+	"io/fs"
 	"net/http"
 	"sort"
 	"sync"
@@ -14,6 +16,9 @@ import (
 	"github.com/wenzuojing/mqx/internal/model"
 	"k8s.io/klog"
 )
+
+//go:embed console-web/dist/*
+var StaticFiles embed.FS
 
 type ConsoleServer struct {
 	cfg     *config.Config
@@ -91,6 +96,16 @@ func (s *ConsoleServer) Start(ctx context.Context) error {
 }
 
 func (s *ConsoleServer) setupRoutes() {
+
+	sub, err := fs.Sub(StaticFiles, "console-web/dist")
+	if err != nil {
+		panic(err)
+	}
+
+	s.engine.NoRoute(func(c *gin.Context) {
+		c.FileFromFS(c.Request.URL.Path, http.FS(sub))
+	})
+
 	// API group
 	api := s.engine.Group("/api")
 	{
