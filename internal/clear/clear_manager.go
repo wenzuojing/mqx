@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/wenzuojing/mqx/internal/config"
@@ -72,6 +73,9 @@ func (c *clearManagerImpl) clearMessage(ctx context.Context) {
 				partitionNum := topic.PartitionNum
 				for i := 0; i < partitionNum; i++ {
 					if err := c.clearMessageByPartition(ctx, topic.Topic, i, topic.RetentionDays); err != nil {
+						if strings.Contains(err.Error(), "doesn't exist") {
+							continue
+						}
 						klog.Errorf("Failed to clear message by partition, topic: %s, partition: %d, error: %v", topic.Topic, i, err)
 					}
 				}

@@ -182,11 +182,19 @@ func (s *ConsoleServer) listConsumerGroups(c *gin.Context) {
 		return b
 	}
 
+	uniqGroup := make(map[string]bool)
+	for _, instance := range consumerOffsets {
+		uniqGroup[instance.Group] = true
+	}
+
 	var consumerGroups []ConsumerGroup
-	for group, clientCount := range groupInstanceCount {
+	for group := range uniqGroup {
 		consumerGroup := ConsumerGroup{
-			Group:       group,
-			ClientCount: clientCount,
+			Group: group,
+		}
+
+		if count, ok := groupInstanceCount[group]; ok {
+			consumerGroup.ClientCount = count
 		}
 
 		var delay int64
