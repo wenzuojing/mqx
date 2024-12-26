@@ -66,6 +66,7 @@ func NewMessageService(cfg *config.Config) (MessageService, error) {
 		clearManager:    factory.GetClearManager(),
 		db:              db,
 		consoleServer:   consoleServer,
+		cfg:             cfg,
 	}, nil
 }
 
@@ -78,6 +79,7 @@ type messageServiceImpl struct {
 	clearManager    interfaces.ClearManager
 	db              *sql.DB
 	consoleServer   *console.ConsoleServer
+	cfg             *config.Config
 }
 
 func (s *messageServiceImpl) Start(ctx context.Context) error {
@@ -138,14 +140,16 @@ func (s *messageServiceImpl) Start(ctx context.Context) error {
 		return nil
 	})
 
-	g.Go(func() error {
-		klog.V(4).Info("Starting console server...")
-		if err := s.consoleServer.Start(ctx); err != nil {
-			klog.Errorf("Failed to start console server: %v", err)
-			return err
-		}
-		return nil
-	})
+	if s.cfg.EnableConsole {
+		g.Go(func() error {
+			klog.V(4).Info("Starting console server...")
+			if err := s.consoleServer.Start(ctx); err != nil {
+				klog.Errorf("Failed to start console server: %v", err)
+				return err
+			}
+			return nil
+		})
+	}
 
 	if err := g.Wait(); err != nil {
 		klog.Errorf("Failed to start message service: %v", err)

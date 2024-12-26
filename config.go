@@ -17,6 +17,7 @@ type Config struct {
 	RetryInterval                     time.Duration // Retry interval for failed operations
 	RetryTimes                        int           // Maximum number of retry attempts
 	ClearInterval                     time.Duration // Clear interval for expired messages
+	EnableConsole                     bool          // Enable console
 	Console                           Console       // Console configuration
 }
 
@@ -41,6 +42,7 @@ func NewConfig() *Config {
 		RetryInterval:                     time.Second * 3,
 		RetryTimes:                        3,
 		ClearInterval:                     time.Second * 120,
+		EnableConsole:                     true,
 		Console:                           Console{Address: ":9000"},
 	}
 }
@@ -113,5 +115,17 @@ func (c *Config) WithRetryInterval(interval time.Duration) *Config {
 // WithRetryTimes sets the maximum number of retry attempts
 func (c *Config) WithRetryTimes(times int) *Config {
 	c.RetryTimes = times
+	return c
+}
+
+// WithEnableConsole sets the enable console
+func (c *Config) WithEnableConsole(enable bool) *Config {
+	c.EnableConsole = enable
+	return c
+}
+
+// WithConsole sets the console configuration
+func (c *Config) WithConsole(console Console) *Config {
+	c.Console = console
 	return c
 }

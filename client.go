@@ -98,6 +98,7 @@ func NewMQX(cfg *Config) (MQX, error) {
 		RetryTimes:          cfg.RetryTimes,
 		ClearInterval:       cfg.ClearInterval,
 		RetentionDays:       cfg.RetentionDays,
+		EnableConsole:       cfg.EnableConsole,
 		Console: config.Console{
 			Address: cfg.Console.Address,
 		},
