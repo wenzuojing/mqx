@@ -103,7 +103,8 @@ func (s *ConsoleServer) setupRoutes() {
 	}
 
 	s.engine.NoRoute(func(c *gin.Context) {
-		c.FileFromFS(c.Request.URL.Path, http.FS(sub))
+		path := c.Request.URL.Path
+		c.FileFromFS(path, http.FS(sub))
 	})
 
 	// API group

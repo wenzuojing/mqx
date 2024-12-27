@@ -91,7 +91,7 @@ const offsetColumns: DataTableColumns<ConsumerOffset> = [
       if (row.maxOffset == 0) {
         return h('span', null, '0')
       }
-      return h('span', null, `${row.maxOffset - row.offset + 1}`)
+      return h('span', null, `${row.maxOffset - row.offset}`)
     }
   }
 ]

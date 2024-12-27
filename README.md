@@ -14,6 +14,7 @@ MQX 是一个基于 MySQL 的轻量级消息队列实现，以 Go 语言库的�
 - 虚拟分区：支持消息分区，提高并发能力
 - 顺序消息：支持同一分区内的消息顺序消费
 - 消费分组：支持消费者分组，同一条消息在组内消费一次
+- 控制台：支持控制台管理消息队列
 
 ### 应用场景
 - 系统解耦：降低系统组件间的耦合度
@@ -113,6 +114,7 @@ go get github.com/github.com/wenzuojing/mqx
 
 ```golang
 	cfg := mqx.NewConfig()
+  cfg.DSN = "root:root@tcp(127.0.0.1:3306)/mqx"
 	cfg.DefaultPartitionNum = 16
 	mq, err := mqx.NewMQX(cfg)
 	if err != nil {
@@ -132,6 +134,7 @@ go get github.com/github.com/wenzuojing/mqx
 ### 消费者示例
 ```golang
 	cfg := mqx.NewConfig()
+  cfg.DSN = "root:root@tcp(127.0.0.1:3306)/mqx"
 	cfg.HeartbeatInterval = time.Second * 5
 	cfg.DefaultPartitionNum = 16
 	mq, err := mqx.NewMQX(cfg)
@@ -144,6 +147,12 @@ go get github.com/github.com/wenzuojing/mqx
 	})
 ```
 
+### 控制台
+```
+http://localhost:9000
+```
+
+![MQX 控制台](./docs/images/mqx-console.png)
 
 ## 3. 核心功能
 
@@ -187,8 +196,10 @@ go get github.com/github.com/wenzuojing/mqx
 
 | 配置项 | 说明 | 默认值 | 单位 |
 |--------|------|--------|------|
-| DSN | 数据库连接字符串 | root:root@tcp(127.0.0.1:3306)/mqx | - |
+| DSN | 数据库连接字符串 | root:root@tcp(127.0.0.1:3306)/mqx?charset=utf8mb4&parseTime=True&loc=Local | - |
 | DefaultPartitionNum | 默认分区数量 | 8 | 个 |
+| PollingInterval | 消息轮询间隔 | 1 | 秒 |
+| PollingSize | 单次轮询消息数量 | 100 | 条 |
 | RetentionDays | 消息保留天数 | 7 | 天 |
 | RebalanceInterval | 消费者重平衡间隔 | 30 | 秒 |
 | RefreshConsumerPartitionsInterval | 刷新消费者分区间隔 | 30 | 秒 |
@@ -198,36 +209,61 @@ go get github.com/github.com/wenzuojing/mqx
 | PullingSize | 单次拉取消息数量 | 100 | 条 |
 | RetryInterval | 失败重试间隔 | 3 | 秒 |
 | RetryTimes | 最大重试次数 | 3 | 次 |
+| ClearInterval | 过期消息清理间隔 | 120 | 秒 |
+| EnableConsole | 是否启用控制台 | true | - |
+| Console.Address | 控制台服务地址 | :9000 | - |
 
 #### 配置方法示例
 
 ```golang
+// 方法一：直接设置
 cfg := mqx.NewConfig()
 cfg.DSN = "root:root@tcp(127.0.0.1:3306)/mqx"
+cfg.DefaultPartitionNum = 16
+
+// 方法二：链式调用
+cfg := mqx.NewConfig().
+    WithDSN("root:root@tcp(127.0.0.1:3306)/mqx").
+    WithDefaultPartitionNum(16).
+    WithRetentionDays(7).
+    WithHeartbeatInterval(time.Second * 30)
 ```
 
 
 
-### 数据库配置
+
 
 ## 6. 性能优化
 
 ### 最佳实践
-1. 合理设置批量处理大小
-2. 适当配置数据库连接池
-3. 定期清理已消费消息
-4. 避免消息体过大
+1. 合理设置消息拉取参数
+   - PullingSize：建议根据业务负载调整，默认100条
+   - PullingInterval：建议根据实时性需求调整，默认2秒
+2. 配置合适的分区数
+   - DefaultPartitionNum：建议根据并发消费需求设置，默认8个分区
+3. 定期清理过期消息
+   - RetentionDays：消息保留天数，默认7天
+   - ClearInterval：清理间隔，默认120秒
+4. 消费者组管理优化
+   - RebalanceInterval：消费者重平衡间隔，默认30秒
+   - HeartbeatInterval：心跳间隔，默认30秒
+   - RefreshConsumerPartitionsInterval：分区刷新间隔，默认30秒
 
-### 参数调优
-1. 消费批次大小：建议 100-1000
-2. 拉取间隔：建议 100ms-1000ms
-3. 数据库连接池：根据并发量调整
+### 参数调优建议
+1. 消息拉取
+   - PullingSize：建议范围 50-500，默认100
+   - PullingInterval：建议范围 1-5秒，默认2秒
+2. 分区数量：建议范围 4-32，默认8
+3. 消息保留：建议范围 1-30天，默认7天
+4. 重试机制
+   - RetryInterval：建议范围 1-10秒，默认3秒
+   - RetryTimes：建议范围 1-5次，默认3次
 
 ### 注意事项
-1. 避免消息积压
-2. 合理设置消费超时
-3. 注意消息幂等处理
-4. 监控消息处理延迟
+1. 避免消息积压，及时调整PullingSize和PullingInterval
+2. 合理设置分区数，过多分区会增加系统开销
+3. 定期清理过期消息，避免存储压力
+4. 监控消费者组状态，保持合理的重平衡间隔
 
 ## 7. 常见问题
 
