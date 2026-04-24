@@ -25,6 +25,8 @@ type factoryImpl struct {
 func NewFactory(db *sql.DB, cfg *config.Config) (interfaces.Factory, error) {
 	f := &factoryImpl{}
 
+	// Create all managers with factory reference.
+	// Managers must not call f.GetXxxManager() during construction.
 	topicManager, err := topic.NewTopicManager(db, cfg, f)
 	if err != nil {
 		return nil, err
@@ -41,8 +43,7 @@ func NewFactory(db *sql.DB, cfg *config.Config) (interfaces.Factory, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	delayManager, err := delay.NewDelayManager(db, f)
+	delayManager, err := delay.NewDelayManager(db, cfg, f)
 	if err != nil {
 		return nil, err
 	}
@@ -50,6 +51,8 @@ func NewFactory(db *sql.DB, cfg *config.Config) (interfaces.Factory, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Assign all managers to factory at once
 	f.topicManager = topicManager
 	f.messageManager = messageManager
 	f.consumerManager = consumerManager

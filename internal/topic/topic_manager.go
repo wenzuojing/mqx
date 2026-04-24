@@ -134,6 +134,10 @@ func (t *topicManager) DeleteTopic(ctx context.Context, topic string) error {
 	}
 	//delete consumer offsets
 	t.factory.GetConsumerManager().DeleteConsumerOffsets(ctx, topicMeta.Topic)
+	//delete delay messages
+	if err := t.factory.GetDelayManager().DeleteMessagesByTopic(ctx, topicMeta.Topic); err != nil {
+		klog.Warningf("Failed to delete delay messages for topic %s: %v", topicMeta.Topic, err)
+	}
 
 	_, err = t.db.ExecContext(ctx, template.DeleteTopicMeta, topic)
 	if err != nil {

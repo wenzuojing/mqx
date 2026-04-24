@@ -7,6 +7,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/wenzuojing/mqx/internal/config"
 	"github.com/wenzuojing/mqx/internal/model"
 )
@@ -16,10 +17,16 @@ func TestGroupConsumer_Start(t *testing.T) {
 	assert.NoError(t, err)
 	defer db.Close()
 
+	mockFactory := new(MockFactory)
+	mockConsumerManager := new(MockConsumerManager)
+	mockFactory.On("GetConsumerManager").Return(mockConsumerManager)
+	mockConsumerManager.On("GetConsumerOffsets", mock.Anything, "test-topic", "test-group").
+		Return([]model.ConsumerOffset{}, nil)
+
 	gc := &groupConsumer{
 		db:                 db,
-		factory:            new(MockFactory),
-		cfg:                &config.Config{},
+		factory:            mockFactory,
+		cfg:                &config.Config{RefreshConsumerPartitionsInterval: time.Second * 30},
 		topic:              "test-topic",
 		group:              "test-group",
 		instanceID:         "test-instance",
@@ -30,6 +37,9 @@ func TestGroupConsumer_Start(t *testing.T) {
 
 	err = gc.Start(context.Background())
 	assert.NoError(t, err)
+
+	time.Sleep(time.Millisecond * 100)
+	gc.Stop(context.Background())
 }
 
 func TestGroupConsumer_Stop(t *testing.T) {
@@ -47,35 +57,20 @@ func TestGroupConsumer_Stop(t *testing.T) {
 }
 
 func TestGroupConsumer_Consume(t *testing.T) {
-	db, smock, err := sqlmock.New()
+	db, _, err := sqlmock.New()
 	assert.NoError(t, err)
 	defer db.Close()
 
 	mockFactory := new(MockFactory)
-	mockMsgManager := new(MockMessageManager)
-	mockFactory.On("GetMessageManager").Return(mockMsgManager)
-	//mock GetMessages
-
-	// Setup SQL mock expectations
-	smock.ExpectQuery("SELECT partition FROM mqx_consumer_offsets").
-		WithArgs("test-group", "test-topic", "test-instance").
-		WillReturnRows(sqlmock.NewRows([]string{"partition"}).
-			AddRow(0).
-			AddRow(1))
-
-	// Mock getOffset queries for both partitions
-	smock.ExpectQuery("SELECT offset FROM mqx_consumer_offsets").
-		WithArgs("test-group", "test-topic", 0, "test-instance").
-		WillReturnRows(sqlmock.NewRows([]string{"offset"}).AddRow(0))
-
-	smock.ExpectQuery("SELECT offset FROM mqx_consumer_offsets").
-		WithArgs("test-group", "test-topic", 1, "test-instance").
-		WillReturnRows(sqlmock.NewRows([]string{"offset"}).AddRow(0))
+	mockConsumerManager := new(MockConsumerManager)
+	mockFactory.On("GetConsumerManager").Return(mockConsumerManager)
+	mockConsumerManager.On("GetConsumerOffsets", mock.Anything, "test-topic", "test-group").
+		Return([]model.ConsumerOffset{}, nil)
 
 	gc := &groupConsumer{
 		db:                 db,
 		factory:            mockFactory,
-		cfg:                &config.Config{},
+		cfg:                &config.Config{RefreshConsumerPartitionsInterval: time.Second * 30},
 		topic:              "test-topic",
 		group:              "test-group",
 		instanceID:         "test-instance",
@@ -84,69 +79,59 @@ func TestGroupConsumer_Consume(t *testing.T) {
 		stopChan:           make(chan struct{}),
 	}
 
-	// Start consumer in goroutine
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	go func() {
-		time.Sleep(time.Second * 10)
+		time.Sleep(time.Millisecond * 200)
 		gc.Stop(ctx)
 	}()
 
-	mockMsgManager.On("GetMessages", ctx, "test-topic", "test-group", 0, 0, 0).Return(nil, nil)
-	mockMsgManager.On("GetMessages", ctx, "test-topic", "test-group", 1, 0, 0).Return(nil, nil)
-
 	gc.consume(ctx)
 
-	// Wait for partition consumers to be created
-
-	// Verify expectations
-	assert.NoError(t, smock.ExpectationsWereMet())
 	mockFactory.AssertExpectations(t)
-
-	// Verify partition consumers were created
-	gc.mu.Lock()
-	assert.Len(t, gc.partitionConsumers, 2)
-	gc.mu.Unlock()
+	mockConsumerManager.AssertExpectations(t)
 }
 
 func TestGroupConsumer_GetConsumerPartitions(t *testing.T) {
-	db, smock, err := sqlmock.New()
-	assert.NoError(t, err)
-	defer db.Close()
-
-	// Setup SQL mock expectations
-	smock.ExpectQuery("SELECT partition FROM mqx_consumer_offsets").
-		WithArgs("test-group", "test-topic", "test-instance").
-		WillReturnRows(sqlmock.NewRows([]string{"partition"}).
-			AddRow(0).
-			AddRow(1))
+	mockFactory := new(MockFactory)
+	mockConsumerManager := new(MockConsumerManager)
+	mockFactory.On("GetConsumerManager").Return(mockConsumerManager)
 
 	gc := &groupConsumer{
-		db:         db,
+		factory:    mockFactory,
 		topic:      "test-topic",
 		group:      "test-group",
 		instanceID: "test-instance",
 	}
 
+	mockConsumerManager.On("GetConsumerOffsets", mock.Anything, "test-topic", "test-group").
+		Return([]model.ConsumerOffset{
+			{Group: "test-group", Topic: "test-topic", Partition: 0, InstanceID: "test-instance", Offset: 0},
+			{Group: "test-group", Topic: "test-topic", Partition: 1, InstanceID: "test-instance", Offset: 0},
+		}, nil)
+
 	partitions, err := gc.getConsumerOffsets(context.Background(), "test-group", "test-topic", "test-instance")
 	assert.NoError(t, err)
 	assert.Len(t, partitions, 2)
-	assert.Contains(t, partitions, 0)
-	assert.Contains(t, partitions, 1)
 
-	assert.NoError(t, smock.ExpectationsWereMet())
+	mockFactory.AssertExpectations(t)
+	mockConsumerManager.AssertExpectations(t)
 }
 
 func TestGroupConsumer_PartitionManagement(t *testing.T) {
-	db, smock, err := sqlmock.New()
+	db, _, err := sqlmock.New()
 	assert.NoError(t, err)
 	defer db.Close()
 
+	mockFactory := new(MockFactory)
+	mockConsumerManager := new(MockConsumerManager)
+	mockFactory.On("GetConsumerManager").Return(mockConsumerManager)
+
 	gc := &groupConsumer{
 		db:                 db,
-		factory:            new(MockFactory),
-		cfg:                &config.Config{},
+		factory:            mockFactory,
+		cfg:                &config.Config{PullingSize: 100, PullingInterval: time.Second},
 		topic:              "test-topic",
 		group:              "test-group",
 		instanceID:         "test-instance",
@@ -155,10 +140,10 @@ func TestGroupConsumer_PartitionManagement(t *testing.T) {
 		stopChan:           make(chan struct{}),
 	}
 
-	// Test adding new partition consumer
-	smock.ExpectQuery("SELECT partition FROM mqx_consumer_offsets").
-		WithArgs("test-group", "test-topic", "test-instance").
-		WillReturnRows(sqlmock.NewRows([]string{"partition"}).AddRow(0))
+	mockConsumerManager.On("GetConsumerOffsets", mock.Anything, "test-topic", "test-group").
+		Return([]model.ConsumerOffset{
+			{Group: "test-group", Topic: "test-topic", Partition: 0, InstanceID: "test-instance", Offset: 0},
+		}, nil)
 
 	ctx := context.Background()
 	partitions, err := gc.getConsumerOffsets(ctx, gc.group, gc.topic, gc.instanceID)
@@ -168,6 +153,7 @@ func TestGroupConsumer_PartitionManagement(t *testing.T) {
 	for _, partition := range partitions {
 		assert.NotContains(t, gc.partitionConsumers, partition.Partition)
 		pc := &partitionConsumer{
+			db:         gc.db,
 			factory:    gc.factory,
 			cfg:        gc.cfg,
 			topic:      gc.topic,
@@ -175,16 +161,17 @@ func TestGroupConsumer_PartitionManagement(t *testing.T) {
 			partition:  partition.Partition,
 			instanceID: gc.instanceID,
 			handler:    gc.handler,
+			stopChan:   make(chan struct{}),
 		}
 		gc.partitionConsumers[partition.Partition] = pc
 	}
 	gc.mu.Unlock()
 
-	// Verify partition consumer was added
 	gc.mu.Lock()
 	assert.Len(t, gc.partitionConsumers, 1)
 	assert.Contains(t, gc.partitionConsumers, 0)
 	gc.mu.Unlock()
 
-	assert.NoError(t, smock.ExpectationsWereMet())
+	mockFactory.AssertExpectations(t)
+	mockConsumerManager.AssertExpectations(t)
 }

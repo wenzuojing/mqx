@@ -12,7 +12,6 @@ import (
 	"github.com/wenzuojing/mqx/internal/factory"
 	"github.com/wenzuojing/mqx/internal/interfaces"
 	"github.com/wenzuojing/mqx/internal/model"
-	"golang.org/x/sync/errgroup"
 	"k8s.io/klog/v2"
 )
 
@@ -30,21 +29,21 @@ type MessageService interface {
 func NewMessageService(cfg *config.Config) (MessageService, error) {
 	klog.V(4).Info("Creating new message service")
 	db, err := sql.Open("mysql", cfg.DSN)
+	if err != nil {
+		klog.Errorf("Failed to open database connection: %v", err)
+		return nil, err
+	}
 	// 设置最大连接数
 	db.SetMaxOpenConns(100)
 	// 设置最大空闲连接数
 	db.SetMaxIdleConns(50)
 	// 设置连接的最大存活时间
 	db.SetConnMaxLifetime(time.Hour)
-	// Enable automatic reconnection
+	// 设置连接的最大空闲时间
 	db.SetConnMaxIdleTime(time.Hour)
 	// Ping database to verify connection
 	if err := db.Ping(); err != nil {
 		klog.Errorf("Failed to ping database: %v", err)
-		return nil, err
-	}
-	if err != nil {
-		klog.Errorf("Failed to open database connection: %v", err)
 		return nil, err
 	}
 
@@ -84,76 +83,38 @@ type messageServiceImpl struct {
 
 func (s *messageServiceImpl) Start(ctx context.Context) error {
 	klog.Info("Starting message service components...")
-	g := new(errgroup.Group)
 
-	g.Go(func() error {
-		klog.V(4).Info("Starting topic manager...")
-		if err := s.topicManager.Start(ctx); err != nil {
-			klog.Errorf("Failed to start topic manager: %v", err)
-			return err
-		}
-		return nil
-	})
-
-	g.Go(func() error {
-		klog.V(4).Info("Starting message manager...")
-		if err := s.messageManager.Start(ctx); err != nil {
-			klog.Errorf("Failed to start message manager: %v", err)
-			return err
-		}
-		return nil
-	})
-
-	g.Go(func() error {
-		klog.V(4).Info("Starting consumer manager...")
-		if err := s.consumerManager.Start(ctx); err != nil {
-			klog.Errorf("Failed to start consumer manager: %v", err)
-			return err
-		}
-		return nil
-	})
-
-	g.Go(func() error {
-		klog.V(4).Info("Starting producer manager...")
-		if err := s.producerManager.Start(ctx); err != nil {
-			klog.Errorf("Failed to start producer manager: %v", err)
-			return err
-		}
-		return nil
-	})
-
-	g.Go(func() error {
-		klog.V(4).Info("Starting delay manager...")
-		if err := s.delayManager.Start(ctx); err != nil {
-			klog.Errorf("Failed to start delay manager: %v", err)
-			return err
-		}
-		return nil
-	})
-
-	g.Go(func() error {
-		klog.V(4).Info("Starting clear manager...")
-		if err := s.clearManager.Start(ctx); err != nil {
-			klog.Errorf("Failed to start clear manager: %v", err)
-			return err
-		}
-		return nil
-	})
-
-	if s.cfg.EnableConsole {
-		g.Go(func() error {
-			klog.V(4).Info("Starting console server...")
-			if err := s.consoleServer.Start(ctx); err != nil {
-				klog.Errorf("Failed to start console server: %v", err)
-				return err
-			}
-			return nil
-		})
+	// Start in dependency order: topic -> message -> consumer/producer/delay/clear
+	if err := s.topicManager.Start(ctx); err != nil {
+		klog.Errorf("Failed to start topic manager: %v", err)
+		return err
+	}
+	if err := s.messageManager.Start(ctx); err != nil {
+		klog.Errorf("Failed to start message manager: %v", err)
+		return err
+	}
+	if err := s.consumerManager.Start(ctx); err != nil {
+		klog.Errorf("Failed to start consumer manager: %v", err)
+		return err
+	}
+	if err := s.producerManager.Start(ctx); err != nil {
+		klog.Errorf("Failed to start producer manager: %v", err)
+		return err
+	}
+	if err := s.delayManager.Start(ctx); err != nil {
+		klog.Errorf("Failed to start delay manager: %v", err)
+		return err
+	}
+	if err := s.clearManager.Start(ctx); err != nil {
+		klog.Errorf("Failed to start clear manager: %v", err)
+		return err
 	}
 
-	if err := g.Wait(); err != nil {
-		klog.Errorf("Failed to start message service: %v", err)
-		return err
+	if s.cfg.EnableConsole {
+		if err := s.consoleServer.Start(ctx); err != nil {
+			klog.Errorf("Failed to start console server: %v", err)
+			return err
+		}
 	}
 
 	klog.Info("All message service components started successfully")
@@ -162,70 +123,57 @@ func (s *messageServiceImpl) Start(ctx context.Context) error {
 
 func (s *messageServiceImpl) Stop(ctx context.Context) error {
 	klog.Info("Stopping message service components...")
-	g := new(errgroup.Group)
 
-	g.Go(func() error {
-		klog.V(4).Info("Stopping topic manager...")
-		if err := s.topicManager.Stop(ctx); err != nil {
-			klog.Errorf("Failed to stop topic manager: %v", err)
-			return err
+	// Stop in reverse dependency order: consumer -> clear/delay -> producer -> message -> topic
+	var firstErr error
+
+	if err := s.consumerManager.Stop(ctx); err != nil {
+		klog.Errorf("Failed to stop consumer manager: %v", err)
+		if firstErr == nil {
+			firstErr = err
 		}
-		return nil
-	})
-
-	g.Go(func() error {
-		klog.V(4).Info("Stopping message manager...")
-		if err := s.messageManager.Stop(ctx); err != nil {
-			klog.Errorf("Failed to stop message manager: %v", err)
-			return err
+	}
+	if err := s.clearManager.Stop(ctx); err != nil {
+		klog.Errorf("Failed to stop clear manager: %v", err)
+		if firstErr == nil {
+			firstErr = err
 		}
-		return nil
-	})
-
-	g.Go(func() error {
-		klog.V(4).Info("Stopping consumer manager...")
-		if err := s.consumerManager.Stop(ctx); err != nil {
-			klog.Errorf("Failed to stop consumer manager: %v", err)
-			return err
+	}
+	if err := s.delayManager.Stop(ctx); err != nil {
+		klog.Errorf("Failed to stop delay manager: %v", err)
+		if firstErr == nil {
+			firstErr = err
 		}
-		return nil
-	})
-
-	g.Go(func() error {
-		klog.V(4).Info("Stopping producer manager...")
-		if err := s.producerManager.Stop(ctx); err != nil {
-			klog.Errorf("Failed to stop producer manager: %v", err)
-			return err
+	}
+	if err := s.producerManager.Stop(ctx); err != nil {
+		klog.Errorf("Failed to stop producer manager: %v", err)
+		if firstErr == nil {
+			firstErr = err
 		}
-		return nil
-	})
-
-	g.Go(func() error {
-		klog.V(4).Info("Stopping delay manager...")
-		if err := s.delayManager.Stop(ctx); err != nil {
-			klog.Errorf("Failed to stop delay manager: %v", err)
-			return err
+	}
+	if err := s.messageManager.Stop(ctx); err != nil {
+		klog.Errorf("Failed to stop message manager: %v", err)
+		if firstErr == nil {
+			firstErr = err
 		}
-		return nil
-	})
-
-	g.Go(func() error {
-		klog.V(4).Info("Stopping clear manager...")
-		if err := s.clearManager.Stop(ctx); err != nil {
-			klog.Errorf("Failed to stop clear manager: %v", err)
-			return err
+	}
+	if err := s.topicManager.Stop(ctx); err != nil {
+		klog.Errorf("Failed to stop topic manager: %v", err)
+		if firstErr == nil {
+			firstErr = err
 		}
-		return nil
-	})
-
-	if err := g.Wait(); err != nil {
-		klog.Errorf("Failed to stop message service: %v", err)
-		return err
 	}
 
 	if err := s.db.Close(); err != nil {
 		klog.Errorf("Failed to close database connection: %v", err)
-		return err
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	if firstErr != nil {
+		klog.Errorf("Failed to stop message service: %v", firstErr)
+		return firstErr
 	}
 
 	klog.Info("All message service components stopped successfully")

@@ -137,12 +137,12 @@ func (s *ConsoleServer) listMessages(c *gin.Context) {
 		PageSize  int    `form:"pageSize" binding:"required"`
 	}
 	if err := c.ShouldBindQuery(&params); err != nil {
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	total, messages, err := s.factory.GetMessageManager().QueryMessageForPage(c.Request.Context(), params.Topic, params.Partition, params.MessageID, params.Tag, params.PageNo, params.PageSize)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -152,21 +152,15 @@ func (s *ConsoleServer) listMessages(c *gin.Context) {
 func (s *ConsoleServer) listConsumerGroups(c *gin.Context) {
 	topic := c.Param("topic")
 	if topic == "" {
-		c.JSON(http.StatusOK, gin.H{"error": "topic parameter is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "topic parameter is required"})
 		return
 	}
 
-	consumerInstances, err := s.factory.GetConsumerManager().GetConsumerInstances(c.Request.Context(), topic, "")
+	heartbeatTimeoutSeconds := int(s.cfg.HeartbeatInterval.Seconds()) * 3
+	activeInstances, err := s.factory.GetConsumerManager().GetActiveConsumerInstances(c.Request.Context(), topic, "", heartbeatTimeoutSeconds)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	activeInstances := make([]model.ConsumerInstance, 0)
-	for _, instance := range consumerInstances {
-		if instance.Active && instance.Heartbeat.After(time.Now().Add(-s.cfg.HeartbeatInterval*3)) {
-			activeInstances = append(activeInstances, instance)
-		}
 	}
 	groupInstanceCount := make(map[string]int)
 	for _, instance := range activeInstances {
@@ -175,13 +169,13 @@ func (s *ConsoleServer) listConsumerGroups(c *gin.Context) {
 
 	partitions, err := queryTopicPartitions(c.Request.Context(), s.factory, topic)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	consumerOffsets, err := s.factory.GetConsumerManager().GetConsumerOffsets(c.Request.Context(), topic, "")
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -236,19 +230,19 @@ func (s *ConsoleServer) listConsumerGroups(c *gin.Context) {
 func (s *ConsoleServer) listConsumerGroupOffsets(c *gin.Context) {
 	topic := c.Param("topic")
 	if topic == "" {
-		c.JSON(http.StatusOK, gin.H{"error": "topic parameter is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "topic parameter is required"})
 		return
 	}
 
 	group := c.Param("group")
 	if group == "" {
-		c.JSON(http.StatusOK, gin.H{"error": "group parameter is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "group parameter is required"})
 		return
 	}
 
 	partitions, err := queryTopicPartitions(c.Request.Context(), s.factory, topic)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -259,7 +253,7 @@ func (s *ConsoleServer) listConsumerGroupOffsets(c *gin.Context) {
 
 	consumerInstances, err := s.factory.GetConsumerManager().GetConsumerInstances(c.Request.Context(), topic, group)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	instanceMap := make(map[string]*model.ConsumerInstance)
@@ -271,7 +265,7 @@ func (s *ConsoleServer) listConsumerGroupOffsets(c *gin.Context) {
 
 	consumerOffsets, err := s.factory.GetConsumerManager().GetConsumerOffsets(c.Request.Context(), topic, group)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -318,13 +312,13 @@ func (s *ConsoleServer) listConsumerGroupOffsets(c *gin.Context) {
 func (s *ConsoleServer) listPartitions(c *gin.Context) {
 	topic := c.Param("topic")
 	if topic == "" {
-		c.JSON(http.StatusOK, gin.H{"error": "topic parameter is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "topic parameter is required"})
 		return
 	}
 
 	partitions, err := queryTopicPartitions(c.Request.Context(), s.factory, topic)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"partitions": partitions})
@@ -377,13 +371,13 @@ func (s *ConsoleServer) listTopics(c *gin.Context) {
 func (s *ConsoleServer) sendMessage(c *gin.Context) {
 	topic := c.Param("topic")
 	if topic == "" {
-		c.JSON(http.StatusOK, gin.H{"error": "topic parameter is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "topic parameter is required"})
 		return
 	}
 
 	var req SendMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -397,7 +391,7 @@ func (s *ConsoleServer) sendMessage(c *gin.Context) {
 
 	messageID, err := s.factory.GetProducerManager().SendSync(c.Request.Context(), msg)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -410,13 +404,13 @@ func (s *ConsoleServer) sendMessage(c *gin.Context) {
 func (s *ConsoleServer) updateTopic(c *gin.Context) {
 	topic := c.Param("topic")
 	if topic == "" {
-		c.JSON(http.StatusOK, gin.H{"error": "topic parameter is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "topic parameter is required"})
 		return
 	}
 
 	var req UpdateTopicRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -428,7 +422,7 @@ func (s *ConsoleServer) updateTopic(c *gin.Context) {
 
 	if err := s.factory.GetTopicManager().UpdateTopicMeta(c.Request.Context(), topicMeta); err != nil {
 		klog.Errorf("Failed to update topic: %v", err)
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -439,7 +433,7 @@ func (s *ConsoleServer) updateTopic(c *gin.Context) {
 func (s *ConsoleServer) createTopic(c *gin.Context) {
 	var req CreateTopicRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -451,7 +445,7 @@ func (s *ConsoleServer) createTopic(c *gin.Context) {
 
 	if err := s.factory.GetTopicManager().CreateTopic(c.Request.Context(), topicMeta); err != nil {
 		klog.Errorf("Failed to create topic: %v", err)
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -462,13 +456,13 @@ func (s *ConsoleServer) createTopic(c *gin.Context) {
 func (s *ConsoleServer) deleteTopic(c *gin.Context) {
 	topic := c.Param("topic")
 	if topic == "" {
-		c.JSON(http.StatusOK, gin.H{"error": "topic parameter is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "topic parameter is required"})
 		return
 	}
 
 	if err := s.factory.GetTopicManager().DeleteTopic(c.Request.Context(), topic); err != nil {
 		klog.Errorf("Failed to delete topic: %v", err)
-		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -500,7 +494,6 @@ func queryTopicPartitions(ctx context.Context, factory interfaces.Factory, topic
 		}(i)
 	}
 	wg.Wait()
-	//排序
 	sort.Slice(partitions, func(i, j int) bool {
 		return partitions[i].Partition < partitions[j].Partition
 	})

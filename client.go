@@ -85,20 +85,19 @@ type MQX interface {
 // NewMQX creates a new message queue instance with the provided configuration
 func NewMQX(cfg *Config) (MQX, error) {
 	messageService, err := internal.NewMessageService(&config.Config{
-		DSN:                 cfg.DSN,
-		DefaultPartitionNum: cfg.DefaultPartitionNum,
-		PollingInterval:     cfg.PollingInterval,
-		PollingSize:         cfg.PollingSize,
-		HeartbeatInterval:   cfg.HeartbeatInterval,
-		RebalanceInterval:   cfg.RebalanceInterval,
-		DelayInterval:       cfg.DelayInterval,
-		PullingInterval:     cfg.PullingInterval,
-		PullingSize:         cfg.PullingSize,
-		RetryInterval:       cfg.RetryInterval,
-		RetryTimes:          cfg.RetryTimes,
-		ClearInterval:       cfg.ClearInterval,
-		RetentionDays:       cfg.RetentionDays,
-		EnableConsole:       cfg.EnableConsole,
+		DSN:                               cfg.DSN,
+		DefaultPartitionNum:               cfg.DefaultPartitionNum,
+		HeartbeatInterval:                 cfg.HeartbeatInterval,
+		RebalanceInterval:                 cfg.RebalanceInterval,
+		RefreshConsumerPartitionsInterval: cfg.RefreshConsumerPartitionsInterval,
+		DelayInterval:                     cfg.DelayInterval,
+		PullingInterval:                   cfg.PullingInterval,
+		PullingSize:                       cfg.PullingSize,
+		RetryInterval:                     cfg.RetryInterval,
+		RetryTimes:                        cfg.RetryTimes,
+		ClearInterval:                     cfg.ClearInterval,
+		RetentionDays:                     cfg.RetentionDays,
+		EnableConsole:                     cfg.EnableConsole,
 		Console: config.Console{
 			Address: cfg.Console.Address,
 		},
@@ -106,7 +105,7 @@ func NewMQX(cfg *Config) (MQX, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := messageService.Start(context.TODO()); err != nil {
+	if err := messageService.Start(context.Background()); err != nil {
 		return nil, err
 	}
 

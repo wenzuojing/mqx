@@ -5,8 +5,6 @@ import "time"
 type Config struct {
 	DSN                               string        // Database connection string
 	DefaultPartitionNum               int           // Default number of partitions
-	PollingInterval                   time.Duration // Message polling interval
-	PollingSize                       int           // Number of messages to poll
 	RetentionDays                     int           // Message retention days
 	RebalanceInterval                 time.Duration // Consumer rebalance interval
 	RefreshConsumerPartitionsInterval time.Duration // Refresh consumer partitions interval

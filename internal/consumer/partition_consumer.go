@@ -3,7 +3,6 @@ package consumer
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"strings"
 	"time"
 
@@ -40,7 +39,19 @@ func (p *partitionConsumer) Stop(ctx context.Context) error {
 }
 
 func (p *partitionConsumer) consume(ctx context.Context) {
-	_offset := int64(0)
+	isBroadcast := strings.HasPrefix(p.group, "__broadcast__")
+	_broadcastOffset := int64(0)
+
+	// For broadcast mode, start from the latest offset to only consume new messages
+	if isBroadcast {
+		maxOffset, err := p.factory.GetMessageManager().GetMaxOffset(ctx, p.topic, p.partition)
+		if err != nil {
+			klog.Warningf("Failed to get max offset for broadcast: %v", err)
+		} else {
+			_broadcastOffset = maxOffset
+		}
+	}
+
 	for {
 		select {
 		case <-p.stopChan:
@@ -48,45 +59,31 @@ func (p *partitionConsumer) consume(ctx context.Context) {
 			return
 		default:
 			start := time.Now()
-			offset := int64(0)
-			if p.group == "__broadcast__" {
-				if _offset > 0 {
-					offset = _offset
-				} else {
-					// For broadcast mode, start from the latest offset
-					maxOffset, err := p.factory.GetMessageManager().GetMaxOffset(ctx, p.topic, p.partition)
-					if err != nil {
-						klog.Errorf("Failed to get max offset: %v", err)
-						time.Sleep(time.Second * 5)
-						break
-					}
-					offset = maxOffset
+			var offset int64
 
-				}
+			if isBroadcast {
+				offset = _broadcastOffset
 			} else {
-
 				lastOffset, err := p.getOffset(ctx, p.group, p.topic, p.partition, p.instanceID)
 				if err != nil {
-					klog.Errorf("Failed to get consumer offset: %v, group: %s, topic: %s, partition: %d, instanceID: %s", err, p.group, p.topic, p.partition, p.instanceID)
+					if err != ErrOffsetNotFound {
+						klog.Errorf("Failed to get consumer offset: %v, group: %s, topic: %s, partition: %d, instanceID: %s", err, p.group, p.topic, p.partition, p.instanceID)
+					}
 					time.Sleep(time.Second * 5)
 					break
 				}
 				offset = lastOffset
-				if offset == 0 {
-					fmt.Println("offset is 0")
-				}
-
 			}
 
 			// Fetch messages from the current offset
-			msgs, err := p.factory.GetMessageManager().GetMessages(ctx, p.topic, p.group, p.partition, offset, p.cfg.PollingSize)
+			msgs, err := p.factory.GetMessageManager().GetMessages(ctx, p.topic, p.group, p.partition, offset, p.cfg.PullingSize)
 			if err != nil {
 				if !strings.Contains(err.Error(), "doesn't exist") {
 					klog.Errorf("Failed to get messages: %v", err)
 				}
 			} else {
 				// Process fetched messages
-				for index, msg := range msgs {
+				for _, msg := range msgs {
 					if err := p.callHandler(msg); err != nil {
 						klog.Errorf("Failed to process message: %v", err)
 						// Move failed message to dead letter queue
@@ -102,10 +99,10 @@ func (p *partitionConsumer) consume(ctx context.Context) {
 						continue
 					}
 
-					if p.group == "__broadcast__" {
-						_offset = offset + int64((index + 1))
+					// Update offset tracking after successful processing
+					if isBroadcast {
+						_broadcastOffset = msg.Offset + 1
 					} else {
-						// Update consumer offset after successful processing
 						err := p.updateConsumerOffset(ctx, p.group, p.topic, p.partition, p.instanceID, msg.Offset)
 						if err != nil {
 							klog.Errorf("Failed to update consumer offset: %v", err)

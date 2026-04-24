@@ -52,8 +52,8 @@ func (g *groupConsumer) consume(ctx context.Context) {
 			}
 			elapsed := time.Since(start)
 			klog.V(4).Infof("Refresh consumer partitions took %s", elapsed)
-			if elapsed < time.Second*30 {
-				time.Sleep(time.Second*30 - elapsed)
+			if elapsed < g.cfg.RefreshConsumerPartitionsInterval {
+				time.Sleep(g.cfg.RefreshConsumerPartitionsInterval - elapsed)
 			}
 		}
 	}

@@ -11,9 +11,9 @@ import (
 func main() {
 
 	cfg := mqx.NewConfig()
-	cfg.DSN = "root:123456@tcp(localhost:3306)/mqx_dev?charset=utf8mb4&parseTime=True&loc=Local"
+	cfg.DSN = "root:mysql@tcp(localhost:3306)/mqx_dev?charset=utf8mb4&parseTime=True&loc=Local"
 	cfg.HeartbeatInterval = time.Second * 5
-	cfg.DefaultPartitionNum = 16
+	cfg.DefaultPartitionNum = 8
 	mq, err := mqx.NewMQX(cfg)
 	if err != nil {
 		panic(err)

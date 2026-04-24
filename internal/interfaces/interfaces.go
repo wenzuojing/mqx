@@ -52,6 +52,8 @@ type ConsumerManager interface {
 	GetConsumerOffsets(ctx context.Context, topic string, group string) ([]model.ConsumerOffset, error)
 	// GetConsumerInstance returns the instance by topic and group
 	GetConsumerInstances(ctx context.Context, topic string, group string) ([]model.ConsumerInstance, error)
+	// GetActiveConsumerInstances returns active instances with recent heartbeat (SQL-level filtering to avoid timezone issues)
+	GetActiveConsumerInstances(ctx context.Context, topic string, group string, heartbeatTimeoutSeconds int) ([]model.ConsumerInstance, error)
 	// Consume starts consuming messages from a topic with the specified handler
 	Consume(ctx context.Context, topic string, group string, handler func(msg *model.Message) error) error
 	// Start initializes the consumer manager service
@@ -76,6 +78,8 @@ type ProducerManager interface {
 type DelayManager interface {
 	// Add adds a message to the delay queue
 	Add(ctx context.Context, msg *model.Message) (string, error)
+	// DeleteMessagesByTopic deletes all delayed messages for a topic
+	DeleteMessagesByTopic(ctx context.Context, topic string) error
 	// Start initializes the delay manager service
 	Start(ctx context.Context) error
 	// Stop gracefully shuts down the delay manager service

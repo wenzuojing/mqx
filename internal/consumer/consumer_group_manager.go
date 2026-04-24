@@ -33,7 +33,12 @@ type consumerGroupManager struct {
 
 func (c *consumerGroupManager) Start(ctx context.Context) error {
 	klog.V(4).Infof("Starting rebalance manager for group: %s, topic: %s", c.group, c.topic)
-	c.updateConsumerInstanceHeartbeat(ctx, c.group, c.topic, c.instanceID, c.hostname)
+	if success, err := c.updateConsumerInstanceHeartbeat(ctx, c.group, c.topic, c.instanceID, c.hostname); err != nil {
+		klog.Errorf("Failed to send initial heartbeat: %v", err)
+		return err
+	} else if !success {
+		klog.Warning("Initial heartbeat was not successful")
+	}
 	go func() {
 		for {
 			select {
@@ -49,6 +54,7 @@ func (c *consumerGroupManager) Start(ctx context.Context) error {
 }
 
 func (c *consumerGroupManager) Stop(ctx context.Context) error {
+	close(c.stopChan)
 	_, err := c.db.Exec(template.UpdateConsumerInstanceUnactive, c.group, c.topic, c.instanceID)
 	return err
 }
@@ -178,18 +184,8 @@ func (c *consumerGroupManager) updateConsumerInstanceHeartbeat(ctx context.Conte
 }
 
 func (c *consumerGroupManager) getActiveConsumerInstances(ctx context.Context, group string, topic string) ([]model.ConsumerInstance, error) {
-	instances, err := c.factory.GetConsumerManager().GetConsumerInstances(ctx, topic, group)
-	if err != nil {
-		return nil, err
-	}
-	//filter active instances
-	activeInstances := make([]model.ConsumerInstance, 0)
-	for _, instance := range instances {
-		if instance.Active && instance.Heartbeat.After(time.Now().Add(-c.cfg.HeartbeatInterval*3)) {
-			activeInstances = append(activeInstances, instance)
-		}
-	}
-	return activeInstances, nil
+	heartbeatTimeoutSeconds := int(c.cfg.HeartbeatInterval.Seconds()) * 3
+	return c.factory.GetConsumerManager().GetActiveConsumerInstances(ctx, topic, group, heartbeatTimeoutSeconds)
 }
 
 func (c *consumerGroupManager) updateConsumerPartitions(ctx context.Context, partitions []model.ConsumerOffset) error {

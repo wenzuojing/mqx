@@ -5,8 +5,6 @@ import "time"
 type Config struct {
 	DSN                               string        // Database connection string
 	DefaultPartitionNum               int           // Default number of partitions
-	PollingInterval                   time.Duration // Message polling interval
-	PollingSize                       int           // Number of messages to poll
 	RetentionDays                     int           // Message retention days
 	RebalanceInterval                 time.Duration // Consumer rebalance interval
 	RefreshConsumerPartitionsInterval time.Duration // Refresh consumer partitions interval
@@ -30,8 +28,6 @@ func NewConfig() *Config {
 	return &Config{
 		DSN:                               "root:root@tcp(127.0.0.1:3306)/mqx?charset=utf8mb4&parseTime=True&loc=Local",
 		DefaultPartitionNum:               8,
-		PollingInterval:                   time.Second,
-		PollingSize:                       100,
 		RetentionDays:                     7,
 		RebalanceInterval:                 time.Second * 30,
 		RefreshConsumerPartitionsInterval: time.Second * 30,
@@ -56,18 +52,6 @@ func (c *Config) WithDSN(dsn string) *Config {
 // WithDefaultPartitionNum sets the default number of partitions
 func (c *Config) WithDefaultPartitionNum(num int) *Config {
 	c.DefaultPartitionNum = num
-	return c
-}
-
-// WithPollingInterval sets the message polling interval
-func (c *Config) WithPollingInterval(interval time.Duration) *Config {
-	c.PollingInterval = interval
-	return c
-}
-
-// WithPollingSize sets the number of messages to poll
-func (c *Config) WithPollingSize(size int) *Config {
-	c.PollingSize = size
 	return c
 }
 

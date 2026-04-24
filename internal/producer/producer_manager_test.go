@@ -76,6 +76,21 @@ func (m *MockMessageManager) Stop(ctx context.Context) error {
 	return args.Error(0)
 }
 
+func (m *MockMessageManager) GetPartitionStat(ctx context.Context, topic string, partition int) (*interfaces.PartitionStat, error) {
+	args := m.Called(ctx, topic, partition)
+	return args.Get(0).(*interfaces.PartitionStat), args.Error(1)
+}
+
+func (m *MockMessageManager) DeleteMessages(ctx context.Context, topic string, partition int) error {
+	args := m.Called(ctx, topic, partition)
+	return args.Error(0)
+}
+
+func (m *MockMessageManager) QueryMessageForPage(ctx context.Context, topic string, partition int, messageID string, tag string, pageNo int, pageSize int) (int, []*model.Message, error) {
+	args := m.Called(ctx, topic, partition, messageID, tag, pageNo, pageSize)
+	return args.Int(0), args.Get(1).([]*model.Message), args.Error(2)
+}
+
 // MockDelayManager implements interfaces.DelayManager for testing
 type MockDelayManager struct {
 	mock.Mock
@@ -93,6 +108,11 @@ func (m *MockDelayManager) Start(ctx context.Context) error {
 
 func (m *MockDelayManager) Stop(ctx context.Context) error {
 	args := m.Called(ctx)
+	return args.Error(0)
+}
+
+func (m *MockDelayManager) DeleteMessagesByTopic(ctx context.Context, topic string) error {
+	args := m.Called(ctx, topic)
 	return args.Error(0)
 }
 

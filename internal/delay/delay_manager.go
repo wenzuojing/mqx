@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/wenzuojing/mqx/internal/config"
 	"github.com/wenzuojing/mqx/internal/interfaces"
 	"github.com/wenzuojing/mqx/internal/model"
 	"github.com/wenzuojing/mqx/internal/template"
@@ -13,14 +14,14 @@ import (
 )
 
 // DelayManager handles delayed message processing
-func NewDelayManager(db *sql.DB, factory interfaces.Factory) (interfaces.DelayManager, error) {
-	return &delayManagerImpl{db: db, factory: factory, interval: time.Second * 5}, nil
+func NewDelayManager(db *sql.DB, cfg *config.Config, factory interfaces.Factory) (interfaces.DelayManager, error) {
+	return &delayManagerImpl{db: db, factory: factory, cfg: cfg, stopChan: make(chan struct{})}, nil
 }
 
 type delayManagerImpl struct {
 	db       *sql.DB
 	factory  interfaces.Factory
-	interval time.Duration
+	cfg      *config.Config
 	stopChan chan struct{}
 }
 
@@ -74,6 +75,12 @@ func (d *delayManagerImpl) Stop(ctx context.Context) error {
 	klog.Info("Stopping delay manager service...")
 	close(d.stopChan)
 	return nil
+}
+
+func (d *delayManagerImpl) DeleteMessagesByTopic(ctx context.Context, topic string) error {
+	klog.Infof("Deleting delayed messages for topic: %s", topic)
+	_, err := d.db.ExecContext(ctx, template.DeleteDelayMessagesByTopic, topic)
+	return err
 }
 
 func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
@@ -165,7 +172,7 @@ func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
 			}
 
 			elapsed := time.Since(start)
-			if remaining := d.interval - elapsed; remaining > 0 {
+			if remaining := d.cfg.DelayInterval - elapsed; remaining > 0 {
 				time.Sleep(remaining)
 			}
 		}

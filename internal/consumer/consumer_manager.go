@@ -181,6 +181,33 @@ func (c *consumerManagerImpl) GetConsumerInstances(ctx context.Context, topic st
 	return instances, nil
 }
 
+func (c *consumerManagerImpl) GetActiveConsumerInstances(ctx context.Context, topic string, group string, heartbeatTimeoutSeconds int) ([]model.ConsumerInstance, error) {
+	query := "SELECT `group`, `topic`, `instance_id`, `hostname`, `active`, `heartbeat` " +
+		"FROM `mqx_consumer_instances` " +
+		"WHERE `topic` = ? AND `active` = TRUE " +
+		"AND `heartbeat` > DATE_SUB(NOW(), INTERVAL ? SECOND)"
+	args := []any{topic, heartbeatTimeoutSeconds}
+	if group != "" {
+		query += " AND `group` = ?"
+		args = append(args, group)
+	}
+	rows, err := c.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var instances []model.ConsumerInstance
+	for rows.Next() {
+		var instance model.ConsumerInstance
+		if err := rows.Scan(&instance.Group, &instance.Topic, &instance.InstanceID, &instance.Hostname, &instance.Active, &instance.Heartbeat); err != nil {
+			return nil, err
+		}
+		instances = append(instances, instance)
+	}
+	return instances, nil
+}
+
 func (c *consumerManagerImpl) DeleteConsumerOffsets(ctx context.Context, topic string) error {
 	_, err := c.db.ExecContext(ctx, template.DeleteConsumerOffsets, topic)
 	if err != nil {

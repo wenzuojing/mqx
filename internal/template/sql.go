@@ -76,6 +76,9 @@ var GetReadyDelayMessages string
 //go:embed sql/delay/delete_delay_message.sql
 var DeleteDelayMessage string
 
+//go:embed sql/delay/delete_delay_messages_by_topic.sql
+var DeleteDelayMessagesByTopic string
+
 //go:embed sql/lock/get_lock.sql
 var GetLock string
 

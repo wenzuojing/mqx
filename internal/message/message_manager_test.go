@@ -47,6 +47,46 @@ func (m *MockFactory) GetClearManager() interfaces.ClearManager {
 	return args.Get(0).(interfaces.ClearManager)
 }
 
+// MockTopicManager implements interfaces.TopicManager for testing
+type MockTopicManager struct {
+	mock.Mock
+}
+
+func (m *MockTopicManager) GetTopicMeta(ctx context.Context, topic string) (*model.TopicMeta, error) {
+	args := m.Called(ctx, topic)
+	return args.Get(0).(*model.TopicMeta), args.Error(1)
+}
+
+func (m *MockTopicManager) GetAllTopicMeta(ctx context.Context) ([]model.TopicMeta, error) {
+	args := m.Called(ctx)
+	return args.Get(0).([]model.TopicMeta), args.Error(1)
+}
+
+func (m *MockTopicManager) UpdateTopicMeta(ctx context.Context, meta *model.TopicMeta) error {
+	args := m.Called(ctx, meta)
+	return args.Error(0)
+}
+
+func (m *MockTopicManager) Start(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
+func (m *MockTopicManager) Stop(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
+func (m *MockTopicManager) CreateTopic(ctx context.Context, meta *model.TopicMeta) error {
+	args := m.Called(ctx, meta)
+	return args.Error(0)
+}
+
+func (m *MockTopicManager) DeleteTopic(ctx context.Context, topic string) error {
+	args := m.Called(ctx, topic)
+	return args.Error(0)
+}
+
 func TestMessageManager_SaveMessage(t *testing.T) {
 	db, smock, err := sqlmock.New()
 	assert.NoError(t, err)
@@ -74,25 +114,17 @@ func TestMessageManager_SaveMessage(t *testing.T) {
 		PartitionNum: 3,
 	}, nil)
 
-	// Mock sequence query
+	// Mock transaction: begin -> insert message -> commit
 	smock.ExpectBegin()
-	smock.ExpectQuery("SELECT COALESCE").
-		WithArgs(0).
-		WillReturnRows(sqlmock.NewRows([]string{"seq"}).AddRow(1))
-
-	// Mock message insertion
-	smock.ExpectPrepare("INSERT INTO mqx_messages_test-topic")
-	smock.ExpectExec("INSERT INTO mqx_messages_test-topic").
+	smock.ExpectPrepare("INSERT INTO `mqx_messages_test-topic_0`").
+		ExpectExec().
 		WithArgs(
-			sqlmock.AnyArg(),
-			0,
-			"",
+			sqlmock.AnyArg(), // message_id
+			sqlmock.AnyArg(), // tag
 			"test-key",
 			[]byte("test message"),
-			sqlmock.AnyArg(),
-			1,
+			sqlmock.AnyArg(), // born_time
 		).WillReturnResult(sqlmock.NewResult(1, 1))
-
 	smock.ExpectCommit()
 
 	id, err := mm.SaveMessage(context.Background(), msg)
@@ -114,32 +146,21 @@ func TestMessageManager_GetMessages(t *testing.T) {
 	}
 
 	now := time.Now()
-	expectedMessages := []*model.Message{
-		{
-			MessageID: "msg-1",
-			Topic:     "test-topic",
-			Key:       "test-key",
-			Body:      []byte("test message"),
-			BornTime:  now,
-			Partition: 0,
-			Offset:    1,
-		},
-	}
 
-	// Mock messages query
-	smock.ExpectQuery("SELECT message_id, partition, tag, `key`, body, born_time, offset FROM mqx_messages_test-topic").
-		WithArgs(0, int64(0), 10).
+	// Mock messages query — actual SQL selects from `mqx_messages_{topic}_{partition}`
+	smock.ExpectQuery("SELECT").
+		WithArgs(int64(0), 10).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"message_id", "partition", "tag", "key", "body", "born_time", "offset",
+			"message_id", "tag", "key", "body", "born_time", "offset",
 		}).AddRow(
-			"msg-1", 0, "", "test-key", []byte("test message"), now, 1,
+			"msg-1", "", "test-key", []byte("test message"), now, 1,
 		))
 
 	messages, err := mm.GetMessages(context.Background(), "test-topic", "test-group", 0, 0, 10)
 	assert.NoError(t, err)
 	assert.Len(t, messages, 1)
-	assert.Equal(t, expectedMessages[0].MessageID, messages[0].MessageID)
-	assert.Equal(t, expectedMessages[0].Key, messages[0].Key)
+	assert.Equal(t, "msg-1", messages[0].MessageID)
+	assert.Equal(t, "test-key", messages[0].Key)
 
 	assert.NoError(t, smock.ExpectationsWereMet())
 }
@@ -153,9 +174,8 @@ func TestMessageManager_GetMaxOffset(t *testing.T) {
 		db: db,
 	}
 
-	// Mock max offset query
+	// Mock max offset query — actual SQL: SELECT COALESCE(MAX(`offset`), 0) as max_offset FROM `%s`
 	smock.ExpectQuery("SELECT COALESCE").
-		WithArgs(0).
 		WillReturnRows(sqlmock.NewRows([]string{"max_offset"}).AddRow(100))
 
 	offset, err := mm.GetMaxOffset(context.Background(), "test-topic", 0)
@@ -175,31 +195,11 @@ func TestMessageManager_CreateMessageTable(t *testing.T) {
 	}
 
 	// Mock table creation
-	smock.ExpectExec("CREATE TABLE IF NOT EXISTS mqx_messages_test-topic").
+	smock.ExpectExec("CREATE TABLE IF NOT EXISTS").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	err = mm.createMessageTable("test-topic", 0)
 	assert.NoError(t, err)
 
 	assert.NoError(t, smock.ExpectationsWereMet())
-}
-
-// MockTopicManager implements interfaces.TopicManager for testing
-type MockTopicManager struct {
-	mock.Mock
-}
-
-func (m *MockTopicManager) GetTopicMeta(ctx context.Context, topic string) (*model.TopicMeta, error) {
-	args := m.Called(ctx, topic)
-	return args.Get(0).(*model.TopicMeta), args.Error(1)
-}
-
-func (m *MockTopicManager) Start(ctx context.Context) error {
-	args := m.Called(ctx)
-	return args.Error(0)
-}
-
-func (m *MockTopicManager) Stop(ctx context.Context) error {
-	args := m.Called(ctx)
-	return args.Error(0)
 }

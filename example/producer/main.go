@@ -10,7 +10,7 @@ import (
 func main() {
 	//集成测试代码
 	cfg := mqx.NewConfig()
-	cfg.DSN = "root:123456@tcp(localhost:3306)/mqx_dev?charset=utf8mb4&parseTime=True&loc=Local"
+	cfg.DSN = "root:mysql@tcp(localhost:3306)/mqx_dev?charset=utf8mb4&parseTime=True&loc=Local"
 	cfg.DefaultPartitionNum = 8
 	mq, err := mqx.NewMQX(cfg)
 	if err != nil {
