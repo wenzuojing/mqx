@@ -3,8 +3,10 @@ INSERT INTO `%s` (
     `tag`,
     `key`,
     `body`,
-    `born_time`
+    `born_time`,
+    `retry_count`
 ) VALUES (
+    ?,
     ?,
     ?,
     ?,
