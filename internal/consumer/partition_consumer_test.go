@@ -100,6 +100,11 @@ func (m *MockMessageManager) SaveMessageWithTx(ctx context.Context, tx *sql.Tx, 
 	return args.Error(0)
 }
 
+func (m *MockMessageManager) SaveRetryMessageWithTx(ctx context.Context, tx *sql.Tx, topic string, partition int, msg *model.Message, retryCount int) error {
+	args := m.Called(ctx, tx, topic, partition, msg, retryCount)
+	return args.Error(0)
+}
+
 func TestPartitionConsumer_Start(t *testing.T) {
 	db, _, err := sqlmock.New()
 	assert.NoError(t, err)
@@ -220,7 +225,7 @@ func TestPartitionConsumer_CallHandler(t *testing.T) {
 	}
 
 	pc := &partitionConsumer{
-		cfg:     &config.Config{RetryTimes: 3, RetryInterval: time.Millisecond, RetryMaxInterval: time.Millisecond * 10},
+		cfg:     &config.Config{},
 		handler: handler,
 	}
 
@@ -229,86 +234,178 @@ func TestPartitionConsumer_CallHandler(t *testing.T) {
 		Body:      []byte("test message"),
 	}
 
-	stopChan := make(chan struct{})
-	err := pc.callHandler(msg, stopChan)
+	err := pc.callHandler(msg)
 	assert.NoError(t, err)
 	assert.True(t, handlerCalled)
 }
 
-func TestPartitionConsumer_CallHandler_ExponentialBackoff(t *testing.T) {
-	attempts := 0
-	handler := func(msg *model.Message) error {
-		attempts++
-		return errors.New("always fail")
-	}
-
-	pc := &partitionConsumer{
-		cfg:     &config.Config{RetryTimes: 4, RetryInterval: time.Millisecond * 10, RetryMaxInterval: time.Millisecond * 50},
-		handler: handler,
-	}
-
-	msg := &model.Message{MessageID: "test-msg"}
-	stopChan := make(chan struct{})
-
-	start := time.Now()
-	err := pc.callHandler(msg, stopChan)
-	elapsed := time.Since(start)
-
-	assert.Error(t, err)
-	assert.Equal(t, 4, attempts)
-	// Expected backoff: 10ms + 20ms + 40ms = 70ms (3 sleeps between 4 attempts)
-	// With some tolerance for scheduling
-	assert.GreaterOrEqual(t, elapsed, time.Millisecond*60)
+// MockDelayManager implements interfaces.DelayManager for testing
+type MockDelayManager struct {
+	mock.Mock
 }
 
-func TestPartitionConsumer_CallHandler_BackoffCapped(t *testing.T) {
-	attempts := 0
-	handler := func(msg *model.Message) error {
-		attempts++
-		return errors.New("always fail")
-	}
-
-	// RetryInterval=10ms, RetryMaxInterval=15ms
-	// Without cap: 10, 20, 40... With cap: 10, 15, 15
-	pc := &partitionConsumer{
-		cfg:     &config.Config{RetryTimes: 4, RetryInterval: time.Millisecond * 10, RetryMaxInterval: time.Millisecond * 15},
-		handler: handler,
-	}
-
-	msg := &model.Message{MessageID: "test-msg"}
-	stopChan := make(chan struct{})
-
-	start := time.Now()
-	err := pc.callHandler(msg, stopChan)
-	elapsed := time.Since(start)
-
-	assert.Error(t, err)
-	assert.Equal(t, 4, attempts)
-	// Expected backoff: 10ms + 15ms(capped) + 15ms(capped) = 40ms
-	assert.GreaterOrEqual(t, elapsed, time.Millisecond*35)
-	// Should not exceed capped total: 15*3 = 45ms + tolerance
-	assert.Less(t, elapsed, time.Millisecond*200)
+func (m *MockDelayManager) Add(ctx context.Context, msg *model.Message) (string, error) {
+	args := m.Called(ctx, msg)
+	return args.String(0), args.Error(1)
 }
 
-func TestPartitionConsumer_CallHandler_SuccessOnRetry(t *testing.T) {
-	attempts := 0
-	handler := func(msg *model.Message) error {
-		attempts++
-		if attempts < 3 {
-			return errors.New("transient error")
-		}
-		return nil
-	}
+func (m *MockDelayManager) AddRetry(ctx context.Context, msg *model.RetryMessage) (string, error) {
+	args := m.Called(ctx, msg)
+	return args.String(0), args.Error(1)
+}
 
-	pc := &partitionConsumer{
-		cfg:     &config.Config{RetryTimes: 5, RetryInterval: time.Millisecond, RetryMaxInterval: time.Millisecond * 10},
-		handler: handler,
-	}
+func (m *MockDelayManager) DeleteMessagesByTopic(ctx context.Context, topic string) error {
+	args := m.Called(ctx, topic)
+	return args.Error(0)
+}
 
-	msg := &model.Message{MessageID: "test-msg"}
-	stopChan := make(chan struct{})
-	err := pc.callHandler(msg, stopChan)
+func (m *MockDelayManager) Start(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
 
+func (m *MockDelayManager) Stop(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
+func TestPartitionConsumer_Consume_HandlerFailure_TriggersAddRetry(t *testing.T) {
+	db, smock, err := sqlmock.New()
 	assert.NoError(t, err)
-	assert.Equal(t, 3, attempts)
+	defer db.Close()
+
+	mockFactory := new(MockFactory)
+	mockMsgManager := new(MockMessageManager)
+	mockConsumerManager := new(MockConsumerManager)
+	mockDelayManager := new(MockDelayManager)
+
+	mockFactory.On("GetMessageManager").Return(mockMsgManager)
+	mockFactory.On("GetConsumerManager").Return(mockConsumerManager)
+	mockFactory.On("GetDelayManager").Return(mockDelayManager)
+
+	testMessages := []*model.Message{
+		{
+			MessageID:  "msg-1",
+			Topic:      "test-topic",
+			Partition:  0,
+			Offset:     1,
+			RetryCount: 0,
+			Body:       []byte("test message"),
+		},
+	}
+
+	mockConsumerManager.On("GetConsumerOffsets", mock.Anything, "test-topic", "test-group").
+		Return([]model.ConsumerOffset{{Partition: 0, InstanceID: "test-instance", Offset: 0}}, nil)
+
+	mockMsgManager.On("GetMessages", mock.Anything, "test-topic", "test-group", 0, int64(0), 100).
+		Return(testMessages, nil)
+
+	// Handler fails
+	handler := func(msg *model.Message) error {
+		return errors.New("handler error")
+	}
+
+	// Expect AddRetry to be called with correct parameters
+	mockDelayManager.On("AddRetry", mock.Anything, mock.MatchedBy(func(msg *model.RetryMessage) bool {
+		return msg.MessageID == "msg-1" &&
+			msg.RetryCount == 1 &&
+			msg.OriginalGroup == "test-group" &&
+			msg.OriginalPartition == 0
+	})).Return("msg-1", nil)
+
+	// Expect offset to advance
+	smock.ExpectExec("UPDATE mqx_consumer_offsets").
+		WithArgs(int64(1), "test-group", "test-topic", 0, "test-instance").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	pc := &partitionConsumer{
+		db:         db,
+		factory:    mockFactory,
+		cfg:        &config.Config{PullingInterval: time.Second, PullingSize: 100, RetryTimes: 3, RetryInterval: time.Second * 3},
+		topic:      "test-topic",
+		group:      "test-group",
+		partition:  0,
+		instanceID: "test-instance",
+		handler:    handler,
+		stopChan:   make(chan struct{}),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	go pc.consume(ctx)
+	time.Sleep(time.Millisecond * 100)
+	pc.Stop(ctx)
+
+	assert.NoError(t, smock.ExpectationsWereMet())
+	mockDelayManager.AssertExpectations(t)
+}
+
+func TestPartitionConsumer_Consume_MaxRetriesExhausted_TriggersDLQ(t *testing.T) {
+	db, smock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer db.Close()
+
+	mockFactory := new(MockFactory)
+	mockMsgManager := new(MockMessageManager)
+	mockConsumerManager := new(MockConsumerManager)
+	mockDelayManager := new(MockDelayManager)
+
+	mockFactory.On("GetMessageManager").Return(mockMsgManager)
+	mockFactory.On("GetConsumerManager").Return(mockConsumerManager)
+	mockFactory.On("GetDelayManager").Return(mockDelayManager)
+
+	testMessages := []*model.Message{
+		{
+			MessageID:  "msg-1",
+			Topic:      "test-topic",
+			Partition:  0,
+			Offset:     1,
+			RetryCount: 2, // Already retried 2 times
+			Body:       []byte("test message"),
+		},
+	}
+
+	mockConsumerManager.On("GetConsumerOffsets", mock.Anything, "test-topic", "test-group").
+		Return([]model.ConsumerOffset{{Partition: 0, InstanceID: "test-instance", Offset: 0}}, nil)
+
+	mockMsgManager.On("GetMessages", mock.Anything, "test-topic", "test-group", 0, int64(0), 100).
+		Return(testMessages, nil)
+
+	// Handler fails
+	handler := func(msg *model.Message) error {
+		return errors.New("handler error")
+	}
+
+	// Expect SaveMessage to DLQ (not AddRetry)
+	mockMsgManager.On("SaveMessage", mock.Anything, mock.MatchedBy(func(msg *model.Message) bool {
+		return msg.Topic == "test-topic_dead" && msg.MessageID == "msg-1"
+	})).Return("msg-1", nil)
+
+	// Expect offset to advance
+	smock.ExpectExec("UPDATE mqx_consumer_offsets").
+		WithArgs(int64(1), "test-group", "test-topic", 0, "test-instance").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	pc := &partitionConsumer{
+		db:         db,
+		factory:    mockFactory,
+		cfg:        &config.Config{PullingInterval: time.Second, PullingSize: 100, RetryTimes: 3},
+		topic:      "test-topic",
+		group:      "test-group",
+		partition:  0,
+		instanceID: "test-instance",
+		handler:    handler,
+		stopChan:   make(chan struct{}),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	go pc.consume(ctx)
+	time.Sleep(time.Millisecond * 100)
+	pc.Stop(ctx)
+
+	assert.NoError(t, smock.ExpectationsWereMet())
+	mockMsgManager.AssertExpectations(t)
 }
