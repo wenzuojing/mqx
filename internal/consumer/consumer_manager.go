@@ -64,15 +64,26 @@ func (c *consumerManagerImpl) Start(ctx context.Context) error {
 
 func (c *consumerManagerImpl) Stop(ctx context.Context) error {
 	klog.Info("Stopping consumer service...")
-	g := new(errgroup.Group)
+
+	// Collect managers and consumers under lock to avoid data race
+	c.mu.Lock()
+	managers := make([]consumerGroupManager, 0, len(c.consumerRebalanceManagers))
 	for _, manager := range c.consumerRebalanceManagers {
+		managers = append(managers, manager)
+	}
+	consumers := make([]*groupConsumer, len(c.groupConsumers))
+	copy(consumers, c.groupConsumers)
+	c.mu.Unlock()
+
+	g := new(errgroup.Group)
+	for _, manager := range managers {
 		m := manager
 		g.Go(func() error {
 			klog.V(4).Infof("Stopping rebalance manager for group: %s", m.group)
 			return m.Stop(ctx)
 		})
 	}
-	for _, gc := range c.groupConsumers {
+	for _, gc := range consumers {
 		consumer := gc
 		g.Go(func() error {
 			klog.V(4).Infof("Stopping group consumer for topic: %s, group: %s",

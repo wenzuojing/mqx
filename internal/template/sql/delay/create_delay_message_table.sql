@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS mqx_delay_messages (
     `topic` VARCHAR(256) NOT NULL,
     `key` VARCHAR(256),
     `tag` VARCHAR(256),
-    `body` TEXT NOT NULL,
+    `body` BLOB NOT NULL,
     `born_time` DATETIME NOT NULL,
     `delay_time` DATETIME NOT NULL,
     INDEX `idx_delay_time` (`delay_time`)

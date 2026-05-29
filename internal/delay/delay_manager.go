@@ -3,6 +3,8 @@ package delay
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -84,9 +86,9 @@ func (d *delayManagerImpl) DeleteMessagesByTopic(ctx context.Context, topic stri
 }
 
 func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
-	// Acquire distributed lock for delay message processing
+	// Acquire distributed lock for delay message processing (30 second timeout)
 	var lockAcquired bool
-	err := d.db.QueryRow(template.GetLock, "delay_message_lock", 315360000).Scan(&lockAcquired)
+	err := d.db.QueryRow(template.GetLock, "delay_message_lock", 30).Scan(&lockAcquired)
 	if err != nil || !lockAcquired {
 		if err != nil {
 			klog.Errorf("Failed to acquire delay message lock: %v", err)
@@ -103,7 +105,7 @@ func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
 	}()
 
 	// Process delayed messages that are ready
-	tranferMessages := func() error {
+	transferMessages := func() error {
 		// Query messages that have reached their delay time
 		rows, err := d.db.Query(template.GetReadyDelayMessages)
 		if err != nil {
@@ -124,32 +126,97 @@ func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
 			messages = append(messages, &msg)
 		}
 
-		// Process messages in a transaction
+		if len(messages) == 0 {
+			return nil
+		}
+
+		// Track poison pills (messages that persistently fail to transfer)
+		poisonPills := make(map[string]bool)
+
+		// Begin transaction
 		tx, err := d.db.Begin()
 		if err != nil {
 			klog.Errorf("Failed to begin transaction: %v", err)
 			return err
 		}
-		defer tx.Rollback()
 
 		for _, msg := range messages {
-			// Move message to regular message queue
-			_, err := d.factory.GetMessageManager().SaveMessage(ctx, &msg.Message)
-			if err != nil {
-				klog.Errorf("Failed to save delayed message to store: %v", err)
+			if poisonPills[msg.MessageID] {
 				continue
 			}
 
-			// Remove processed message from delay queue
+			// Move message to regular message queue (within the same tx)
+			err := d.factory.GetMessageManager().SaveMessageWithTx(ctx, tx, &msg.Message)
+			if err != nil {
+				if strings.Contains(err.Error(), "doesn't exist") {
+					// DDL causes implicit commit in MySQL — must create table outside tx
+					tx.Rollback()
+					topicMeta, metaErr := d.factory.GetTopicManager().GetTopicMeta(ctx, msg.Topic)
+					if metaErr != nil {
+						klog.Errorf("Failed to get topic meta for table creation: %v", metaErr)
+						poisonPills[msg.MessageID] = true
+						// Start fresh tx for remaining messages
+						tx, err = d.db.Begin()
+						if err != nil {
+							return err
+						}
+						continue
+					}
+					// Calculate partition and table name outside the tx
+					key := msg.Key
+					hash := 0
+					for _, c := range key {
+						hash = 31*hash + int(c)
+					}
+					partition := hash % topicMeta.PartitionNum
+					if partition < 0 {
+						partition = -partition
+					}
+					tableName := fmt.Sprintf("mqx_messages_%s_%d", msg.Topic, partition)
+					if _, createErr := d.db.Exec(fmt.Sprintf(template.CreateMessageTableTemplate, tableName)); createErr != nil {
+						klog.Errorf("Failed to create message table %s: %v", tableName, createErr)
+						poisonPills[msg.MessageID] = true
+						// Start fresh tx for remaining messages
+						tx, err = d.db.Begin()
+						if err != nil {
+							return err
+						}
+						continue
+					}
+					// Retry with a fresh transaction
+					tx, err = d.db.Begin()
+					if err != nil {
+						klog.Errorf("Failed to begin retry transaction: %v", err)
+						return err
+					}
+					err = d.factory.GetMessageManager().SaveMessageWithTx(ctx, tx, &msg.Message)
+				}
+				if err != nil {
+					// Poison pill: record failed message ID and skip it to unblock remaining messages
+					klog.Errorf("Poison pill detected — message %s failed to transfer, skipping: %v", msg.MessageID, err)
+					poisonPills[msg.MessageID] = true
+					// Start fresh tx for remaining messages (current tx may be poisoned)
+					tx.Rollback()
+					tx, err = d.db.Begin()
+					if err != nil {
+						return err
+					}
+					continue
+				}
+			}
+
+			// Remove processed message from delay queue (within the same tx)
 			_, err = tx.Exec(template.DeleteDelayMessage, msg.ID)
 			if err != nil {
 				klog.Errorf("Failed to delete processed delayed message: %v", err)
+				tx.Rollback()
 				return err
 			}
 		}
 
 		if err := tx.Commit(); err != nil {
 			klog.Errorf("Failed to commit delayed message transaction: %v", err)
+			tx.Rollback()
 			return err
 		}
 		klog.V(4).Infof("Successfully processed %d delayed messages", len(messages))
@@ -164,7 +231,7 @@ func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
 			return nil
 		default:
 			start := time.Now()
-			err := tranferMessages()
+			err := transferMessages()
 			if err != nil {
 				klog.Errorf("Error in transfer messages cycle: %v", err)
 				time.Sleep(time.Second)

@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/wenzuojing/mqx/internal/model"
 )
@@ -24,6 +25,9 @@ type MessageManager interface {
 	DeleteMessages(ctx context.Context, topic string, partition int) error
 	// QueryMessageForPage retrieves messages from a specific partition for pagination
 	QueryMessageForPage(ctx context.Context, topic string, partition int, messageID string, tag string, pageNo int, pageSize int) (int, []*model.Message, error)
+	// SaveMessageWithTx saves a message using a caller-managed transaction.
+	// The caller is responsible for committing or rolling back the transaction.
+	SaveMessageWithTx(ctx context.Context, tx *sql.Tx, msg *model.Message) error
 }
 
 // TopicManager handles topic metadata management

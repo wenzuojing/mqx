@@ -2,6 +2,8 @@ package consumer
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -93,6 +95,11 @@ func (m *MockMessageManager) QueryMessageForPage(ctx context.Context, topic stri
 	return args.Int(0), args.Get(1).([]*model.Message), args.Error(2)
 }
 
+func (m *MockMessageManager) SaveMessageWithTx(ctx context.Context, tx *sql.Tx, msg *model.Message) error {
+	args := m.Called(ctx, tx, msg)
+	return args.Error(0)
+}
+
 func TestPartitionConsumer_Start(t *testing.T) {
 	db, _, err := sqlmock.New()
 	assert.NoError(t, err)
@@ -109,7 +116,7 @@ func TestPartitionConsumer_Start(t *testing.T) {
 	pc := &partitionConsumer{
 		db:         db,
 		factory:    mockFactory,
-		cfg:        &config.Config{PullingInterval: time.Second},
+		cfg:        &config.Config{PullingInterval: time.Second, RetryTimes: 3},
 		topic:      "test-topic",
 		group:      "test-group",
 		partition:  0,
@@ -181,7 +188,7 @@ func TestPartitionConsumer_Consume(t *testing.T) {
 	pc := &partitionConsumer{
 		db:         db,
 		factory:    mockFactory,
-		cfg:        &config.Config{PullingInterval: time.Second, PullingSize: 100},
+		cfg:        &config.Config{PullingInterval: time.Second, PullingSize: 100, RetryTimes: 3},
 		topic:      "test-topic",
 		group:      "test-group",
 		partition:  0,
@@ -213,7 +220,7 @@ func TestPartitionConsumer_CallHandler(t *testing.T) {
 	}
 
 	pc := &partitionConsumer{
-		cfg:     &config.Config{RetryTimes: 3, RetryInterval: time.Millisecond},
+		cfg:     &config.Config{RetryTimes: 3, RetryInterval: time.Millisecond, RetryMaxInterval: time.Millisecond * 10},
 		handler: handler,
 	}
 
@@ -222,7 +229,86 @@ func TestPartitionConsumer_CallHandler(t *testing.T) {
 		Body:      []byte("test message"),
 	}
 
-	err := pc.callHandler(msg)
+	stopChan := make(chan struct{})
+	err := pc.callHandler(msg, stopChan)
 	assert.NoError(t, err)
 	assert.True(t, handlerCalled)
+}
+
+func TestPartitionConsumer_CallHandler_ExponentialBackoff(t *testing.T) {
+	attempts := 0
+	handler := func(msg *model.Message) error {
+		attempts++
+		return errors.New("always fail")
+	}
+
+	pc := &partitionConsumer{
+		cfg:     &config.Config{RetryTimes: 4, RetryInterval: time.Millisecond * 10, RetryMaxInterval: time.Millisecond * 50},
+		handler: handler,
+	}
+
+	msg := &model.Message{MessageID: "test-msg"}
+	stopChan := make(chan struct{})
+
+	start := time.Now()
+	err := pc.callHandler(msg, stopChan)
+	elapsed := time.Since(start)
+
+	assert.Error(t, err)
+	assert.Equal(t, 4, attempts)
+	// Expected backoff: 10ms + 20ms + 40ms = 70ms (3 sleeps between 4 attempts)
+	// With some tolerance for scheduling
+	assert.GreaterOrEqual(t, elapsed, time.Millisecond*60)
+}
+
+func TestPartitionConsumer_CallHandler_BackoffCapped(t *testing.T) {
+	attempts := 0
+	handler := func(msg *model.Message) error {
+		attempts++
+		return errors.New("always fail")
+	}
+
+	// RetryInterval=10ms, RetryMaxInterval=15ms
+	// Without cap: 10, 20, 40... With cap: 10, 15, 15
+	pc := &partitionConsumer{
+		cfg:     &config.Config{RetryTimes: 4, RetryInterval: time.Millisecond * 10, RetryMaxInterval: time.Millisecond * 15},
+		handler: handler,
+	}
+
+	msg := &model.Message{MessageID: "test-msg"}
+	stopChan := make(chan struct{})
+
+	start := time.Now()
+	err := pc.callHandler(msg, stopChan)
+	elapsed := time.Since(start)
+
+	assert.Error(t, err)
+	assert.Equal(t, 4, attempts)
+	// Expected backoff: 10ms + 15ms(capped) + 15ms(capped) = 40ms
+	assert.GreaterOrEqual(t, elapsed, time.Millisecond*35)
+	// Should not exceed capped total: 15*3 = 45ms + tolerance
+	assert.Less(t, elapsed, time.Millisecond*200)
+}
+
+func TestPartitionConsumer_CallHandler_SuccessOnRetry(t *testing.T) {
+	attempts := 0
+	handler := func(msg *model.Message) error {
+		attempts++
+		if attempts < 3 {
+			return errors.New("transient error")
+		}
+		return nil
+	}
+
+	pc := &partitionConsumer{
+		cfg:     &config.Config{RetryTimes: 5, RetryInterval: time.Millisecond, RetryMaxInterval: time.Millisecond * 10},
+		handler: handler,
+	}
+
+	msg := &model.Message{MessageID: "test-msg"}
+	stopChan := make(chan struct{})
+	err := pc.callHandler(msg, stopChan)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 3, attempts)
 }

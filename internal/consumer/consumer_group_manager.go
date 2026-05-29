@@ -61,28 +61,30 @@ func (c *consumerGroupManager) Stop(ctx context.Context) error {
 
 // rebalance performs consumer group partition rebalancing
 func (c *consumerGroupManager) rebalance(ctx context.Context) error {
-	var lockAcquired bool
-	err := c.db.QueryRow("SELECT GET_LOCK('rebalance_lock', 315360000)").Scan(&lockAcquired)
-	if err != nil || !lockAcquired {
-		if err != nil {
-			klog.Errorf("Failed to acquire rebalance lock: %v", err)
-		}
-		time.Sleep(time.Second)
-		return nil
-	}
-
-	klog.V(4).Info("Acquired rebalance lock")
-	// Release the lock when we're done
-	defer func() {
-		c.db.Exec("SELECT RELEASE_LOCK('rebalance_lock')")
-		klog.V(4).Info("Released rebalance lock")
-	}()
-
 	for {
 		select {
 		case <-c.stopChan:
 			return nil
 		default:
+		}
+
+		// Acquire lock with reasonable timeout (30 seconds)
+		var lockAcquired bool
+		err := c.db.QueryRow("SELECT GET_LOCK('rebalance_lock', 30)").Scan(&lockAcquired)
+		if err != nil || !lockAcquired {
+			if err != nil {
+				klog.Errorf("Failed to acquire rebalance lock: %v", err)
+			}
+			time.Sleep(time.Second)
+			continue
+		}
+
+		klog.V(4).Info("Acquired rebalance lock")
+		func() {
+			defer func() {
+				c.db.Exec("SELECT RELEASE_LOCK('rebalance_lock')")
+				klog.V(4).Info("Released rebalance lock")
+			}()
 			start := time.Now()
 			err := c.doRebalance(ctx)
 			if err != nil {
@@ -92,7 +94,7 @@ func (c *consumerGroupManager) rebalance(ctx context.Context) error {
 			if remaining := c.cfg.RebalanceInterval - elapsed; remaining > 0 {
 				time.Sleep(remaining)
 			}
-		}
+		}()
 	}
 }
 

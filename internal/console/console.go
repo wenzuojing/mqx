@@ -288,21 +288,25 @@ func (s *ConsoleServer) listConsumerGroupOffsets(c *gin.Context) {
 	for _, partition := range partitions {
 		consumerPartition := partitionMap[partition.Partition]
 
-		offsets = append(offsets, Offset{
+		offset := Offset{
 			Partition: partition.Partition,
-			Offset:    consumerPartition.Offset,
-		})
+		}
 
-		if instance, ok := instanceMap[consumerPartition.InstanceID]; ok {
-			offsets[partition.Partition].InstanceId = instance.InstanceID
-			offsets[partition.Partition].Hostname = instance.Hostname
-			offsets[partition.Partition].Active = instance.Active
+		if consumerPartition != nil {
+			offset.Offset = consumerPartition.Offset
+			if instance, ok := instanceMap[consumerPartition.InstanceID]; ok {
+				offset.InstanceId = instance.InstanceID
+				offset.Hostname = instance.Hostname
+				offset.Active = instance.Active
+			}
 		}
 
 		if stat, ok := partitionStatMap[partition.Partition]; ok {
-			offsets[partition.Partition].MaxOffset = stat.Stat.MaxOffset
-			offsets[partition.Partition].MinOffset = stat.Stat.MinOffset
+			offset.MaxOffset = stat.Stat.MaxOffset
+			offset.MinOffset = stat.Stat.MinOffset
 		}
+
+		offsets = append(offsets, offset)
 
 	}
 

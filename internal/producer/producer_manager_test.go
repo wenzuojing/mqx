@@ -2,6 +2,7 @@ package producer
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -89,6 +90,11 @@ func (m *MockMessageManager) DeleteMessages(ctx context.Context, topic string, p
 func (m *MockMessageManager) QueryMessageForPage(ctx context.Context, topic string, partition int, messageID string, tag string, pageNo int, pageSize int) (int, []*model.Message, error) {
 	args := m.Called(ctx, topic, partition, messageID, tag, pageNo, pageSize)
 	return args.Int(0), args.Get(1).([]*model.Message), args.Error(2)
+}
+
+func (m *MockMessageManager) SaveMessageWithTx(ctx context.Context, tx *sql.Tx, msg *model.Message) error {
+	args := m.Called(ctx, tx, msg)
+	return args.Error(0)
 }
 
 // MockDelayManager implements interfaces.DelayManager for testing

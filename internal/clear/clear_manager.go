@@ -58,7 +58,7 @@ func (c *clearManagerImpl) clearMessage(ctx context.Context) {
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-c.stopChan:
 			return
 		case <-ticker.C:
 			//查询所有topicMeta

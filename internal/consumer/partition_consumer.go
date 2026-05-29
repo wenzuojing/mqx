@@ -3,6 +3,8 @@ package consumer
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -12,6 +14,8 @@ import (
 	"github.com/wenzuojing/mqx/internal/template"
 	"k8s.io/klog/v2"
 )
+
+var errConsumerStopped = errors.New("consumer stopped")
 
 // partitionConsumer handles message consumption for a specific partition
 type partitionConsumer struct {
@@ -84,18 +88,33 @@ func (p *partitionConsumer) consume(ctx context.Context) {
 			} else {
 				// Process fetched messages
 				for _, msg := range msgs {
-					if err := p.callHandler(msg); err != nil {
+					if err := p.callHandler(msg, p.stopChan); err != nil {
+						if errors.Is(err, errConsumerStopped) {
+							return
+						}
 						klog.Errorf("Failed to process message: %v", err)
 						// Move failed message to dead letter queue
-						p.factory.GetMessageManager().SaveMessage(ctx, &model.Message{
+						_, dlqErr := p.factory.GetMessageManager().SaveMessage(ctx, &model.Message{
 							MessageID: msg.MessageID,
 							Topic:     msg.Topic + "_dead",
 							Partition: msg.Partition,
 							Offset:    msg.Offset,
 							Key:       msg.Key,
+							Tag:       msg.Tag,
 							BornTime:  msg.BornTime,
 							Body:      msg.Body,
 						})
+						if dlqErr != nil {
+							klog.Errorf("Failed to save message to dead letter queue: %v", dlqErr)
+						}
+						// Advance offset to prevent infinite retry loop (both group and broadcast mode)
+						if !isBroadcast {
+							if updErr := p.updateConsumerOffset(ctx, p.group, p.topic, p.partition, p.instanceID, msg.Offset); updErr != nil {
+								klog.Errorf("Failed to advance offset after dead letter: %v", updErr)
+							}
+						} else {
+							_broadcastOffset = msg.Offset + 1
+						}
 						continue
 					}
 
@@ -151,13 +170,30 @@ func (p *partitionConsumer) getOffset(ctx context.Context, group string, topic s
 	return 0, ErrOffsetNotFound
 }
 
-// callHandler executes message handler with retry mechanism
-func (p *partitionConsumer) callHandler(msg *model.Message) error {
+// callHandler executes message handler with retry mechanism using exponential backoff.
+// It respects the stopChan signal to allow graceful shutdown during retry waits.
+func (p *partitionConsumer) callHandler(msg *model.Message, stopChan chan struct{}) error {
+	if p.cfg.RetryTimes <= 0 {
+		return fmt.Errorf("retry times must be > 0")
+	}
 	for i := 0; i < p.cfg.RetryTimes; i++ {
 		if err := p.handler(msg); err != nil {
 			klog.Warningf("Message handling failed (attempt %d/%d): %v", i+1, p.cfg.RetryTimes, err)
 			if i < p.cfg.RetryTimes-1 {
-				time.Sleep(p.cfg.RetryInterval)
+				// Exponential backoff: baseInterval * 2^attempt, capped at maxInterval
+				backoff := p.cfg.RetryInterval * (1 << uint(i))
+				if backoff > p.cfg.RetryMaxInterval || backoff <= 0 {
+					backoff = p.cfg.RetryMaxInterval
+				}
+				klog.V(4).Infof("Retrying in %v (attempt %d/%d)", backoff, i+2, p.cfg.RetryTimes)
+				// Use NewTimer to avoid goroutine leak from time.After
+				timer := time.NewTimer(backoff)
+				select {
+				case <-stopChan:
+					timer.Stop()
+					return errConsumerStopped
+				case <-timer.C:
+				}
 				continue
 			}
 			return err

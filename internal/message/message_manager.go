@@ -37,25 +37,33 @@ func (s *messageManagerImpl) Stop(ctx context.Context) error {
 	return nil
 }
 
+// prepareMessage validates topic, calculates partition, and assigns messageID.
+// Shared by SaveMessage and SaveMessageWithTx.
+func (s *messageManagerImpl) prepareMessage(msg *model.Message) error {
+	if !isValidTopicName(msg.Topic) {
+		return fmt.Errorf("invalid topic name")
+	}
+	if len(msg.Topic) > 256 {
+		return fmt.Errorf("topic name '%s' is too long: maximum length is 512 characters", msg.Topic)
+	}
+	topicMeta, err := s.factory.GetTopicManager().GetTopicMeta(context.Background(), msg.Topic)
+	if err != nil {
+		return errors.Wrap(err, "failed to get topic metadata")
+	}
+	msg.Partition = s.calculatePartition(msg.Key, topicMeta.PartitionNum)
+	if msg.MessageID == "" {
+		msg.MessageID = uuid.New().String()
+	}
+	return nil
+}
+
 func (s *messageManagerImpl) SaveMessage(ctx context.Context, msg *model.Message) (string, error) {
 	klog.V(4).Infof("Saving message to topic %s, key: %s", msg.Topic, msg.Key)
 
-	// Validate topic name - only allow alphanumeric and underscore characters
-	if !isValidTopicName(msg.Topic) {
-		return "", fmt.Errorf("invalid topic name")
+	if err := s.prepareMessage(msg); err != nil {
+		return "", err
 	}
-	if len(msg.Topic) > 256 {
-		return "", fmt.Errorf("topic name '%s' is too long: maximum length is 512 characters", msg.Topic)
-	}
-
-	topicMeta, err := s.factory.GetTopicManager().GetTopicMeta(ctx, msg.Topic)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to get topic metadata")
-	}
-	// Calculate partition based on message key
-	partition := s.calculatePartition(msg.Key, topicMeta.PartitionNum)
-	msg.Partition = partition
-	klog.V(4).Infof("Calculated partition %d for message", partition)
+	klog.V(4).Infof("Calculated partition %d for message", msg.Partition)
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -63,17 +71,12 @@ func (s *messageManagerImpl) SaveMessage(ctx context.Context, msg *model.Message
 	}
 	defer tx.Rollback()
 
-	if msg.MessageID == "" {
-		msg.MessageID = uuid.New().String()
-	}
-
 	err = s.insertMessage(tx, msg)
 	if err != nil {
 		if strings.Contains(err.Error(), "doesn't exist") {
 			if err := s.createMessageTable(msg.Topic, msg.Partition); err != nil {
 				return "", errors.Wrap(err, "failed to create message table")
 			}
-			// Retry insert after table creation
 			err = s.insertMessage(tx, msg)
 		}
 		if err != nil {
@@ -86,6 +89,21 @@ func (s *messageManagerImpl) SaveMessage(ctx context.Context, msg *model.Message
 	}
 	klog.V(4).Infof("Successfully saved message with ID %s", msg.MessageID)
 	return msg.MessageID, nil
+}
+
+// SaveMessageWithTx saves a message using a caller-managed transaction.
+// The caller is responsible for committing or rolling back the transaction.
+// IMPORTANT: This method does NOT create the message table automatically (DDL causes implicit commit in MySQL,
+// which would break the caller's transaction atomicity). If the table doesn't exist, caller must create it
+// outside the transaction first.
+func (s *messageManagerImpl) SaveMessageWithTx(ctx context.Context, tx *sql.Tx, msg *model.Message) error {
+	if err := s.prepareMessage(msg); err != nil {
+		return err
+	}
+	if err := s.insertMessage(tx, msg); err != nil {
+		return errors.Wrap(err, "failed to insert message")
+	}
+	return nil
 }
 
 func (s *messageManagerImpl) GetMessages(ctx context.Context, topic string, group string, partition int, offset int64, size int) ([]*model.Message, error) {
@@ -196,7 +214,7 @@ func (t *messageManagerImpl) calculatePartition(key string, partitionNum int) in
 	return abs(hash) % partitionNum
 }
 
-// createMessageTable creates a new message table for a topic
+// createMessageTable creates a new message table for a topic. Must be called outside a transaction (DDL causes implicit commit).
 func (t *messageManagerImpl) createMessageTable(topic string, partition int) error {
 	klog.V(4).Infof("Creating message table for topic %s, partition %d", topic, partition)
 	_, err := t.db.Exec(fmt.Sprintf(template.CreateMessageTableTemplate, t.getMessageTableName(topic, partition)))

@@ -29,7 +29,7 @@ func (p *producerManagerImpl) SendSync(ctx context.Context, msg *model.Message) 
 // SendAsync sends a message asynchronously and invokes callback with the result
 func (p *producerManagerImpl) SendAsync(ctx context.Context, msg *model.Message, callback func(string, error)) error {
 	go func() {
-		id, err := p.SendSync(ctx, msg)
+		id, err := p.SendSync(context.WithoutCancel(ctx), msg)
 		callback(id, err)
 	}()
 	return nil

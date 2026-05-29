@@ -2,6 +2,7 @@ package delay
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -93,6 +94,11 @@ func (m *MockMessageManager) QueryMessageForPage(ctx context.Context, topic stri
 	return args.Int(0), args.Get(1).([]*model.Message), args.Error(2)
 }
 
+func (m *MockMessageManager) SaveMessageWithTx(ctx context.Context, tx *sql.Tx, msg *model.Message) error {
+	args := m.Called(ctx, tx, msg)
+	return args.Error(0)
+}
+
 func TestDelayManager_Start(t *testing.T) {
 	db, smock, err := sqlmock.New()
 	assert.NoError(t, err)
@@ -180,8 +186,8 @@ func TestDelayManager_ProcessDelayMessages(t *testing.T) {
 		))
 
 	// Mock message transfer
-	mockMsgManager.On("SaveMessage", mock.Anything, mock.AnythingOfType("*model.Message")).
-		Return("msg-1", nil)
+	mockMsgManager.On("SaveMessageWithTx", mock.Anything, mock.Anything, mock.AnythingOfType("*model.Message")).
+		Return(nil)
 
 	// Mock transaction for cleanup — actual SQL uses WHERE `id` = ?
 	smock.ExpectBegin()
