@@ -13,7 +13,6 @@ type Config struct {
 	PullingInterval                   time.Duration // Message pulling interval
 	PullingSize                       int           // Batch size for message pulling
 	RetryInterval                     time.Duration // Retry interval for failed operations (base interval for exponential backoff)
-	RetryMaxInterval                  time.Duration // Maximum retry interval (cap for exponential backoff)
 	RetryTimes                        int           // Maximum number of retry attempts
 	ClearInterval                     time.Duration // Clear interval for expired messages
 	EnableConsole                     bool          // Enable console
@@ -37,7 +36,6 @@ func NewConfig() *Config {
 		PullingInterval:                   time.Second * 2,
 		PullingSize:                       100,
 		RetryInterval:                     time.Second * 3,
-		RetryMaxInterval:                  time.Second * 30,
 		RetryTimes:                        3,
 		ClearInterval:                     time.Second * 120,
 		EnableConsole:                     true,
@@ -95,12 +93,6 @@ func (c *Config) WithPullingSize(size int) *Config {
 // WithRetryInterval sets the base retry interval for exponential backoff
 func (c *Config) WithRetryInterval(interval time.Duration) *Config {
 	c.RetryInterval = interval
-	return c
-}
-
-// WithRetryMaxInterval sets the maximum retry interval (cap for exponential backoff)
-func (c *Config) WithRetryMaxInterval(interval time.Duration) *Config {
-	c.RetryMaxInterval = interval
 	return c
 }
 

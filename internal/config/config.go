@@ -13,7 +13,6 @@ type Config struct {
 	PullingInterval                   time.Duration // Message pulling interval
 	PullingSize                       int           // Batch size for message pulling
 	RetryInterval                     time.Duration // Retry interval for failed operations (base interval for exponential backoff)
-	RetryMaxInterval                  time.Duration // Maximum retry interval (cap for exponential backoff)
 	RetryTimes                        int           // Maximum number of retry attempts
 	ClearInterval                     time.Duration // Clear interval for expired messages
 	Console                           Console       // Console configuration

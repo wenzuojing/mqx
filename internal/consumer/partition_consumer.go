@@ -105,8 +105,9 @@ func (p *partitionConsumer) consume(ctx context.Context) {
 						} else {
 							// Schedule async retry via delay queue
 							backoff := p.cfg.RetryInterval * (1 << uint(msg.RetryCount))
-							if backoff > p.cfg.RetryMaxInterval || backoff <= 0 {
-								backoff = p.cfg.RetryMaxInterval
+							if backoff <= 0 {
+								// Overflow protection
+								backoff = time.Minute * 5
 							}
 							klog.V(4).Infof("Scheduling retry for message %s (attempt %d/%d) in %v",
 								msg.MessageID, msg.RetryCount+1, p.cfg.RetryTimes, backoff)

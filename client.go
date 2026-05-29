@@ -94,7 +94,6 @@ func NewMQX(cfg *Config) (MQX, error) {
 		PullingInterval:                   cfg.PullingInterval,
 		PullingSize:                       cfg.PullingSize,
 		RetryInterval:                     cfg.RetryInterval,
-		RetryMaxInterval:                  cfg.RetryMaxInterval,
 		RetryTimes:                        cfg.RetryTimes,
 		ClearInterval:                     cfg.ClearInterval,
 		RetentionDays:                     cfg.RetentionDays,
