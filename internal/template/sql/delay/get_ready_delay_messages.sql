@@ -11,6 +11,6 @@ SELECT
     `original_group`,
     `original_partition`
 FROM mqx_delay_messages
-WHERE `delay_time` <= NOW()
+WHERE `delay_time` <= ?
 ORDER BY `born_time` ASC
 LIMIT 100;

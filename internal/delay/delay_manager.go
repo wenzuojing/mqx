@@ -142,7 +142,7 @@ func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
 	// Process delayed messages that are ready
 	transferMessages := func() error {
 		// Query messages that have reached their delay time
-		rows, err := d.db.Query(template.GetReadyDelayMessages)
+		rows, err := d.db.Query(template.GetReadyDelayMessages, time.Now())
 		if err != nil {
 			klog.Errorf("Failed to query delayed messages: %v", err)
 			return err
