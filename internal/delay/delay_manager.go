@@ -40,6 +40,9 @@ func (d *delayManagerImpl) Add(ctx context.Context, msg *model.Message) (string,
 		msg.Body,
 		msg.BornTime,
 		msg.BornTime.Add(msg.Delay),
+		0,   // retry_count: user-initiated delays are not retries
+		nil, // original_group: not applicable
+		nil, // original_partition: not applicable
 	)
 	if err != nil {
 		klog.Errorf("Failed to insert delayed message: %v", err)
@@ -47,6 +50,38 @@ func (d *delayManagerImpl) Add(ctx context.Context, msg *model.Message) (string,
 	}
 	klog.V(4).Infof("Successfully added delayed message with ID: %s", msg.MessageID)
 	return msg.MessageID, nil
+}
+
+func (d *delayManagerImpl) AddRetry(ctx context.Context, msg *model.RetryMessage) (string, error) {
+	klog.V(4).Infof("Adding retry message for topic: %s, delay: %v, retryCount: %d", msg.Topic, msg.Delay, msg.RetryCount)
+	if msg.MessageID == "" {
+		msg.MessageID = uuid.New().String()
+	}
+	delayTime := time.Now().Add(msg.Delay)
+	_, err := d.db.Exec(template.InsertDelayMessage,
+		msg.MessageID,
+		msg.Topic,
+		msg.Key,
+		msg.Tag,
+		msg.Body,
+		msg.BornTime,
+		delayTime,
+		msg.RetryCount,
+		msg.OriginalGroup,
+		msg.OriginalPartition,
+	)
+	if err != nil {
+		klog.Errorf("Failed to insert retry message: %v", err)
+		return "", err
+	}
+	klog.V(4).Infof("Successfully added retry message with ID: %s", msg.MessageID)
+	return msg.MessageID, nil
+}
+
+// transferRetryMessage moves a retry message back to its original topic and partition with retry_count
+func (d *delayManagerImpl) transferRetryMessage(ctx context.Context, tx *sql.Tx, msg *model.DelayMessage) error {
+	return d.factory.GetMessageManager().SaveRetryMessageWithTx(ctx, tx,
+		msg.Topic, msg.OriginalPartition, &msg.Message, msg.RetryCount)
 }
 
 func (d *delayManagerImpl) Start(ctx context.Context) error {
@@ -118,7 +153,8 @@ func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
 		for rows.Next() {
 			var msg model.DelayMessage
 			var delayTime time.Time
-			err := rows.Scan(&msg.ID, &msg.MessageID, &msg.Topic, &msg.Key, &msg.Tag, &msg.Body, &msg.BornTime, &delayTime)
+			err := rows.Scan(&msg.ID, &msg.MessageID, &msg.Topic, &msg.Key, &msg.Tag, &msg.Body, &msg.BornTime, &delayTime,
+				&msg.RetryCount, &msg.OriginalGroup, &msg.OriginalPartition)
 			if err != nil {
 				klog.Warningf("Failed to scan delayed message: %v", err)
 				continue
@@ -145,8 +181,15 @@ func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
 				continue
 			}
 
-			// Move message to regular message queue (within the same tx)
-			err := d.factory.GetMessageManager().SaveMessageWithTx(ctx, tx, &msg.Message)
+			// Distinguish retry messages from user-initiated delay messages
+			if msg.RetryCount > 0 {
+				// Retry message -> transfer back to original topic+partition with retry_count
+				err = d.transferRetryMessage(ctx, tx, msg)
+			} else {
+				// User-initiated delay -> existing behavior
+				err = d.factory.GetMessageManager().SaveMessageWithTx(ctx, tx, &msg.Message)
+			}
+
 			if err != nil {
 				if strings.Contains(err.Error(), "doesn't exist") {
 					// DDL causes implicit commit in MySQL — must create table outside tx
@@ -162,15 +205,20 @@ func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
 						}
 						continue
 					}
-					// Calculate partition and table name outside the tx
-					key := msg.Key
-					hash := 0
-					for _, c := range key {
-						hash = 31*hash + int(c)
-					}
-					partition := hash % topicMeta.PartitionNum
-					if partition < 0 {
-						partition = -partition
+					// For retry messages, use the original partition; for user delays, calculate it
+					var partition int
+					if msg.RetryCount > 0 {
+						partition = msg.OriginalPartition
+					} else {
+						key := msg.Key
+						hash := 0
+						for _, c := range key {
+							hash = 31*hash + int(c)
+						}
+						partition = hash % topicMeta.PartitionNum
+						if partition < 0 {
+							partition = -partition
+						}
 					}
 					tableName := fmt.Sprintf("mqx_messages_%s_%d", msg.Topic, partition)
 					if _, createErr := d.db.Exec(fmt.Sprintf(template.CreateMessageTableTemplate, tableName)); createErr != nil {
@@ -189,7 +237,12 @@ func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
 						klog.Errorf("Failed to begin retry transaction: %v", err)
 						return err
 					}
-					err = d.factory.GetMessageManager().SaveMessageWithTx(ctx, tx, &msg.Message)
+					// Re-attempt the transfer with the new table
+					if msg.RetryCount > 0 {
+						err = d.transferRetryMessage(ctx, tx, msg)
+					} else {
+						err = d.factory.GetMessageManager().SaveMessageWithTx(ctx, tx, &msg.Message)
+					}
 				}
 				if err != nil {
 					// Poison pill: record failed message ID and skip it to unblock remaining messages
