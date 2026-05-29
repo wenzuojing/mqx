@@ -153,11 +153,20 @@ func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
 		for rows.Next() {
 			var msg model.DelayMessage
 			var delayTime time.Time
+			var originalGroup sql.NullString
+			var originalPartition sql.NullInt64
 			err := rows.Scan(&msg.ID, &msg.MessageID, &msg.Topic, &msg.Key, &msg.Tag, &msg.Body, &msg.BornTime, &delayTime,
-				&msg.RetryCount, &msg.OriginalGroup, &msg.OriginalPartition)
+				&msg.RetryCount, &originalGroup, &originalPartition)
 			if err != nil {
 				klog.Warningf("Failed to scan delayed message: %v", err)
 				continue
+			}
+			// Handle nullable columns: user-initiated delays have NULL for these fields
+			if originalGroup.Valid {
+				msg.OriginalGroup = originalGroup.String
+			}
+			if originalPartition.Valid {
+				msg.OriginalPartition = int(originalPartition.Int64)
 			}
 			messages = append(messages, &msg)
 		}
