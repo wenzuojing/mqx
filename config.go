@@ -36,7 +36,7 @@ func NewConfig() *Config {
 		PullingInterval:                   time.Second * 2,
 		PullingSize:                       100,
 		RetryInterval:                     time.Second * 3,
-		RetryTimes:                        3,
+		RetryTimes:                        10,
 		ClearInterval:                     time.Second * 120,
 		EnableConsole:                     true,
 		Console:                           Console{Address: ":9000"},

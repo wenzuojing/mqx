@@ -112,11 +112,9 @@ func (p *partitionConsumer) consume(ctx context.Context) {
 							klog.V(4).Infof("Scheduling retry for message %s (attempt %d/%d) in %v",
 								msg.MessageID, msg.RetryCount+1, p.cfg.RetryTimes, backoff)
 							_, retryErr := p.factory.GetDelayManager().AddRetry(ctx, &model.RetryMessage{
-								Message:           *msg,
-								RetryCount:        msg.RetryCount + 1,
-								OriginalGroup:     p.group,
-								OriginalPartition: msg.Partition,
-								Delay:             backoff,
+								Message:    *msg,
+								RetryCount: msg.RetryCount + 1,
+								Delay:      backoff,
 							})
 							if retryErr != nil {
 								klog.Errorf("Failed to schedule retry for message %s: %v", msg.MessageID, retryErr)

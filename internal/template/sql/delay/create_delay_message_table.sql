@@ -8,7 +8,5 @@ CREATE TABLE IF NOT EXISTS mqx_delay_messages (
     `born_time` DATETIME NOT NULL,
     `delay_time` DATETIME NOT NULL,
     `retry_count` INT NOT NULL DEFAULT 0,
-    `original_group` VARCHAR(256) DEFAULT NULL,
-    `original_partition` INT DEFAULT NULL,
     INDEX `idx_delay_time` (`delay_time`)
 ) ENGINE=InnoDB;

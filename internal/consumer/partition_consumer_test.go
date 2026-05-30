@@ -100,11 +100,6 @@ func (m *MockMessageManager) SaveMessageWithTx(ctx context.Context, tx *sql.Tx, 
 	return args.Error(0)
 }
 
-func (m *MockMessageManager) SaveRetryMessageWithTx(ctx context.Context, tx *sql.Tx, topic string, partition int, msg *model.Message, retryCount int) error {
-	args := m.Called(ctx, tx, topic, partition, msg, retryCount)
-	return args.Error(0)
-}
-
 func TestPartitionConsumer_Start(t *testing.T) {
 	db, _, err := sqlmock.New()
 	assert.NoError(t, err)
@@ -308,9 +303,7 @@ func TestPartitionConsumer_Consume_HandlerFailure_TriggersAddRetry(t *testing.T)
 	// Expect AddRetry to be called with correct parameters
 	mockDelayManager.On("AddRetry", mock.Anything, mock.MatchedBy(func(msg *model.RetryMessage) bool {
 		return msg.MessageID == "msg-1" &&
-			msg.RetryCount == 1 &&
-			msg.OriginalGroup == "test-group" &&
-			msg.OriginalPartition == 0
+			msg.RetryCount == 1
 	})).Return("msg-1", nil)
 
 	// Expect offset to advance

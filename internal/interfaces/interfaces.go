@@ -28,8 +28,6 @@ type MessageManager interface {
 	// SaveMessageWithTx saves a message using a caller-managed transaction.
 	// The caller is responsible for committing or rolling back the transaction.
 	SaveMessageWithTx(ctx context.Context, tx *sql.Tx, msg *model.Message) error
-	// SaveRetryMessageWithTx saves a retry message with retry_count to a specific partition
-	SaveRetryMessageWithTx(ctx context.Context, tx *sql.Tx, topic string, partition int, msg *model.Message, retryCount int) error
 }
 
 // TopicManager handles topic metadata management

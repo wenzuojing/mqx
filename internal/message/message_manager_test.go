@@ -205,8 +205,8 @@ func TestMessageManager_CreateMessageTable(t *testing.T) {
 	assert.NoError(t, smock.ExpectationsWereMet())
 }
 
-func TestMessageManager_SaveRetryMessageWithTx(t *testing.T) {
-	db, mock, err := sqlmock.New()
+func TestMessageManager_SaveMessageWithTx(t *testing.T) {
+	db, smock, err := sqlmock.New()
 	assert.NoError(t, err)
 	defer db.Close()
 
@@ -217,24 +217,30 @@ func TestMessageManager_SaveRetryMessageWithTx(t *testing.T) {
 	mm := &messageManagerImpl{db: db, factory: mockFactory}
 
 	msg := &model.Message{
-		MessageID: "retry-msg-1",
-		Topic:     "test-topic",
-		Key:       "key1",
-		Tag:       "tag1",
-		Body:      []byte("retry body"),
-		BornTime:  time.Now(),
+		MessageID:  "retry-msg-1",
+		Topic:      "test-topic",
+		Key:        "key1",
+		Tag:        "tag1",
+		Body:       []byte("retry body"),
+		BornTime:   time.Now(),
+		RetryCount: 2,
 	}
 
-	mock.ExpectBegin()
-	mock.ExpectPrepare("INSERT INTO `mqx_messages_test-topic_1`").
+	mockTopicManager.On("GetTopicMeta", mock.Anything, "test-topic").Return(&model.TopicMeta{
+		Topic:        "test-topic",
+		PartitionNum: 3,
+	}, nil)
+
+	smock.ExpectBegin()
+	smock.ExpectPrepare("INSERT INTO `mqx_messages_test-topic_0`").
 		ExpectExec().
 		WithArgs("retry-msg-1", "tag1", "key1", []byte("retry body"), sqlmock.AnyArg(), 2).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	tx, _ := db.Begin()
-	err = mm.SaveRetryMessageWithTx(context.Background(), tx, "test-topic", 1, msg, 2)
+	err = mm.SaveMessageWithTx(context.Background(), tx, msg)
 	assert.NoError(t, err)
 	tx.Rollback()
 
-	assert.NoError(t, mock.ExpectationsWereMet())
+	assert.NoError(t, smock.ExpectationsWereMet())
 }

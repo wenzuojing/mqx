@@ -106,37 +106,6 @@ func (s *messageManagerImpl) SaveMessageWithTx(ctx context.Context, tx *sql.Tx, 
 	return nil
 }
 
-// SaveRetryMessageWithTx saves a retry message with retry_count to a specific partition using a caller-managed transaction.
-func (s *messageManagerImpl) SaveRetryMessageWithTx(ctx context.Context, tx *sql.Tx, topic string, partition int, msg *model.Message, retryCount int) error {
-	if msg.MessageID == "" {
-		msg.MessageID = uuid.New().String()
-	}
-	msg.Topic = topic
-	msg.Partition = partition
-
-	tableName := s.getMessageTableName(topic, partition)
-	stmt, err := tx.Prepare(fmt.Sprintf(template.InsertMessageTemplate, tableName))
-	if err != nil {
-		return errors.Wrap(err, "failed to prepare statement")
-	}
-	defer stmt.Close()
-
-	result, err := stmt.Exec(msg.MessageID, msg.Tag, msg.Key, msg.Body, msg.BornTime, retryCount)
-	if err != nil {
-		return errors.Wrap(err, "failed to insert retry message")
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return errors.Wrap(err, "failed to get rows affected")
-	}
-	if rowsAffected == 0 {
-		return fmt.Errorf("retry message save failed")
-	}
-
-	return nil
-}
-
 func (s *messageManagerImpl) GetMessages(ctx context.Context, topic string, group string, partition int, offset int64, size int) ([]*model.Message, error) {
 	klog.V(4).Infof("Getting messages from topic %s, partition %d, offset %d, size %d", topic, partition, offset, size)
 	messages := make([]*model.Message, 0)
@@ -149,6 +118,7 @@ func (s *messageManagerImpl) GetMessages(ctx context.Context, topic string, grou
 	for rows.Next() {
 		var message model.Message
 		message.Partition = partition
+		message.Topic = topic
 		err = rows.Scan(&message.MessageID, &message.Tag, &message.Key, &message.Body, &message.BornTime, &message.Offset, &message.RetryCount)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to scan message row")

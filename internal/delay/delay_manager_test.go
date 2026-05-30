@@ -26,10 +26,8 @@ func TestDelayManager_AddRetry(t *testing.T) {
 			Body:      []byte("retry body"),
 			BornTime:  time.Now(),
 		},
-		RetryCount:        2,
-		OriginalGroup:     "test-group",
-		OriginalPartition: 1,
-		Delay:             time.Second * 10,
+		RetryCount: 2,
+		Delay:      time.Second * 10,
 	}
 
 	mock.ExpectExec("INSERT INTO mqx_delay_messages").
@@ -42,8 +40,6 @@ func TestDelayManager_AddRetry(t *testing.T) {
 			sqlmock.AnyArg(), // bornTime
 			sqlmock.AnyArg(), // delayTime
 			2,
-			"test-group",
-			1,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 

@@ -6,6 +6,6 @@ CREATE TABLE IF NOT EXISTS `%s` (
     `body` BLOB,
     `born_time` DATETIME NOT NULL,
     `retry_count` INT NOT NULL DEFAULT 0,
-    UNIQUE KEY `uk_message_id` (`message_id`),
+    KEY `idx_message_id` (`message_id`),
     KEY `idx_tag` (`tag`)
 ) ENGINE = InnoDB

@@ -97,11 +97,6 @@ func (m *MockMessageManager) SaveMessageWithTx(ctx context.Context, tx *sql.Tx, 
 	return args.Error(0)
 }
 
-func (m *MockMessageManager) SaveRetryMessageWithTx(ctx context.Context, tx *sql.Tx, topic string, partition int, msg *model.Message, retryCount int) error {
-	args := m.Called(ctx, tx, topic, partition, msg, retryCount)
-	return args.Error(0)
-}
-
 // MockDelayManager implements interfaces.DelayManager for testing
 type MockDelayManager struct {
 	mock.Mock

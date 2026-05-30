@@ -32,7 +32,7 @@ func main() {
 	cfg.RetryInterval = time.Second * 2 // backoff base: 2s, 4s, 8s ...
 	cfg.PullingInterval = time.Second   // poll every second
 	cfg.DelayInterval = time.Second     // check delay queue every second
-	cfg.EnableConsole = false
+	cfg.EnableConsole = true
 
 	mq, err := mqx.NewMQX(cfg)
 	if err != nil {
@@ -104,10 +104,10 @@ func main() {
 		key  string
 		body string
 	}{
-		{"msg-normal", "normal message, processed immediately"},
-		{"msg-fail-0", "another normal message"},
+		// {"msg-normal", "normal message, processed immediately"},
+		// {"msg-fail-0", "another normal message"},
 		{"msg-fail-2", "fails 2 times, recovers on 3rd attempt"},
-		{"msg-fail-5", "always fails, will go to DLQ"},
+		// {"msg-fail-5", "always fails, will go to DLQ"},
 	}
 
 	for _, m := range messages {

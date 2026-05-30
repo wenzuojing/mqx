@@ -16,17 +16,13 @@ type Message struct {
 }
 
 type DelayMessage struct {
-	ID                int64  `json:"id"`
+	ID int64 `json:"id"`
 	Message
-	RetryCount        int    `json:"retryCount"`
-	OriginalGroup     string `json:"originalGroup"`
-	OriginalPartition int    `json:"originalPartition"`
+	RetryCount int `json:"retryCount"`
 }
 
 type RetryMessage struct {
 	Message
-	RetryCount        int
-	OriginalGroup     string
-	OriginalPartition int
-	Delay             time.Duration
+	RetryCount int
+	Delay      time.Duration
 }

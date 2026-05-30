@@ -6,12 +6,8 @@ INSERT INTO mqx_delay_messages (
     `body`,
     `born_time`,
     `delay_time`,
-    `retry_count`,
-    `original_group`,
-    `original_partition`
+    `retry_count`
 ) VALUES (
-    ?,
-    ?,
     ?,
     ?,
     ?,
