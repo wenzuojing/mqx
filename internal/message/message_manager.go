@@ -132,8 +132,7 @@ func (s *messageManagerImpl) GetMessages(ctx context.Context, topic string, grou
 func (s *messageManagerImpl) GetMaxOffset(ctx context.Context, topic string, partition int) (int64, error) {
 	klog.V(4).Infof("Getting max offset for topic %s, partition %d", topic, partition)
 	var maxOffset int64
-	err := s.db.QueryRow(fmt.Sprintf(template.SelectMaxOffsetTemplate, s.getMessageTableName(topic, partition)),
-		partition).Scan(&maxOffset)
+	err := s.db.QueryRow(fmt.Sprintf(template.SelectMaxOffsetTemplate, s.getMessageTableName(topic, partition))).Scan(&maxOffset)
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to get max offset")
 	}

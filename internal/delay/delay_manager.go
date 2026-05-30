@@ -119,10 +119,19 @@ func (d *delayManagerImpl) DeleteMessagesByTopic(ctx context.Context, topic stri
 }
 
 func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
-	// Acquire distributed lock for delay message processing (30 second timeout)
+	// Acquire distributed lock on a dedicated connection to ensure GET_LOCK and
+	// RELEASE_LOCK operate on the same session (sql.DB is a connection pool).
+	conn, err := d.db.Conn(ctx)
+	if err != nil {
+		klog.Errorf("Failed to get dedicated connection for delay lock: %v", err)
+		time.Sleep(time.Second)
+		return nil
+	}
+
 	var lockAcquired bool
-	err := d.db.QueryRow(template.GetLock, "delay_message_lock", 30).Scan(&lockAcquired)
+	err = conn.QueryRowContext(ctx, template.GetLock, "delay_message_lock", 30).Scan(&lockAcquired)
 	if err != nil || !lockAcquired {
+		conn.Close()
 		if err != nil {
 			klog.Errorf("Failed to acquire delay message lock: %v", err)
 		}
@@ -131,9 +140,9 @@ func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
 	}
 
 	klog.V(4).Info("Acquired delay message lock")
-	// Release the lock when done
 	defer func() {
-		d.db.Exec(template.ReleaseLock, "delay_message_lock")
+		conn.ExecContext(ctx, template.ReleaseLock, "delay_message_lock")
+		conn.Close()
 		klog.V(4).Info("Released delay message lock")
 	}()
 
@@ -230,6 +239,10 @@ func (d *delayManagerImpl) processDelayMessages(ctx context.Context) error {
 					// Poison pill: record failed message ID and skip it to unblock remaining messages
 					klog.Errorf("Poison pill detected — message %s failed to transfer, skipping: %v", msg.MessageID, err)
 					poisonPills[msg.MessageID] = true
+					// Remove from delay table to prevent continuous re-processing on every cycle
+					if _, delErr := d.db.Exec(template.DeleteDelayMessage, msg.ID); delErr != nil {
+						klog.Errorf("Failed to delete poison pill message %d from delay table: %v", msg.ID, delErr)
+					}
 					// Start fresh tx for remaining messages (current tx may be poisoned)
 					tx.Rollback()
 					tx, err = d.db.Begin()

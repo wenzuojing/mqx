@@ -42,13 +42,24 @@ func (p *partitionConsumer) consume(ctx context.Context) {
 	isBroadcast := strings.HasPrefix(p.group, "__broadcast__")
 	_broadcastOffset := int64(0)
 
-	// For broadcast mode, start from the latest offset to only consume new messages
+	// For broadcast mode, start from the latest offset to only consume new messages.
+	// Retry until successful to avoid consuming all historical messages (offset 0).
 	if isBroadcast {
-		maxOffset, err := p.factory.GetMessageManager().GetMaxOffset(ctx, p.topic, p.partition)
-		if err != nil {
-			klog.Warningf("Failed to get max offset for broadcast: %v", err)
-		} else {
-			_broadcastOffset = maxOffset
+	initBroadcast:
+		for {
+			select {
+			case <-p.stopChan:
+				return
+			default:
+				maxOffset, err := p.factory.GetMessageManager().GetMaxOffset(ctx, p.topic, p.partition)
+				if err != nil {
+					klog.Warningf("Failed to get max offset for broadcast, retrying: %v", err)
+					time.Sleep(time.Second)
+				} else {
+					_broadcastOffset = maxOffset
+					break initBroadcast
+				}
+			}
 		}
 	}
 
