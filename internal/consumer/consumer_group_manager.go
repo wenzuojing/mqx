@@ -68,10 +68,19 @@ func (c *consumerGroupManager) rebalance(ctx context.Context) error {
 		default:
 		}
 
-		// Acquire lock with reasonable timeout (30 seconds)
+		// Acquire lock on a dedicated connection to ensure GET_LOCK and RELEASE_LOCK
+		// operate on the same session (sql.DB is a connection pool).
+		conn, err := c.db.Conn(ctx)
+		if err != nil {
+			klog.Errorf("Failed to get dedicated connection for rebalance lock: %v", err)
+			time.Sleep(time.Second)
+			continue
+		}
+
 		var lockAcquired bool
-		err := c.db.QueryRow("SELECT GET_LOCK('rebalance_lock', 30)").Scan(&lockAcquired)
+		err = conn.QueryRowContext(ctx, "SELECT GET_LOCK('rebalance_lock', 30)").Scan(&lockAcquired)
 		if err != nil || !lockAcquired {
+			conn.Close()
 			if err != nil {
 				klog.Errorf("Failed to acquire rebalance lock: %v", err)
 			}
@@ -80,21 +89,19 @@ func (c *consumerGroupManager) rebalance(ctx context.Context) error {
 		}
 
 		klog.V(4).Info("Acquired rebalance lock")
-		func() {
-			defer func() {
-				c.db.Exec("SELECT RELEASE_LOCK('rebalance_lock')")
-				klog.V(4).Info("Released rebalance lock")
-			}()
-			start := time.Now()
-			err := c.doRebalance(ctx)
-			if err != nil {
-				klog.Errorf("Failed to rebalance: %v", err)
-			}
-			elapsed := time.Since(start)
-			if remaining := c.cfg.RebalanceInterval - elapsed; remaining > 0 {
-				time.Sleep(remaining)
-			}
-		}()
+		start := time.Now()
+		err = c.doRebalance(ctx)
+		if err != nil {
+			klog.Errorf("Failed to rebalance: %v", err)
+		}
+		conn.ExecContext(ctx, "SELECT RELEASE_LOCK('rebalance_lock')")
+		conn.Close()
+		klog.V(4).Info("Released rebalance lock")
+
+		elapsed := time.Since(start)
+		if remaining := c.cfg.RebalanceInterval - elapsed; remaining > 0 {
+			time.Sleep(remaining)
+		}
 	}
 }
 
