@@ -63,12 +63,12 @@ func main() {
 		body  string
 		delay time.Duration
 	}{
-		// {"instant-1", "no delay - should arrive immediately", 0},
-		// {"instant-2", "no delay - should arrive immediately", 0},
-		// {"delay-2s", "2 second delay", 2 * time.Second},
-		// {"delay-5s", "5 second delay", 5 * time.Second},
-		// {"delay-10s", "10 second delay", 10 * time.Second},
-		// {"delay-15s", "15 second delay", 15 * time.Second},
+		{"instant-1", "no delay - should arrive immediately", 0},
+		{"instant-2", "no delay - should arrive immediately", 0},
+		{"delay-2s", "2 second delay", 2 * time.Second},
+		{"delay-5s", "5 second delay", 5 * time.Second},
+		{"delay-10s", "10 second delay", 10 * time.Second},
+		{"delay-15s", "15 second delay", 15 * time.Second},
 	}
 
 	sentAt := time.Now()

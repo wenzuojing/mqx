@@ -104,10 +104,10 @@ func main() {
 		key  string
 		body string
 	}{
-		// {"msg-normal", "normal message, processed immediately"},
-		// {"msg-fail-0", "another normal message"},
+		{"msg-normal", "normal message, processed immediately"},
+		{"msg-fail-0", "another normal message"},
 		{"msg-fail-2", "fails 2 times, recovers on 3rd attempt"},
-		// {"msg-fail-5", "always fails, will go to DLQ"},
+		{"msg-fail-5", "always fails, will go to DLQ"},
 	}
 
 	for _, m := range messages {
